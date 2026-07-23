@@ -1,0 +1,134 @@
+import { create } from 'zustand'
+import { supabase } from '../../shared/lib/supabase'
+import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import type { RestaurantTable } from './types'
+
+/**
+ * Real data now — this is the first screen wired to Supabase instead of
+ * in-memory demo state. `init()` loads the branch's tables once and opens a
+ * Realtime channel; every write below (seatReservation, markArrived,
+ * transferTable, addTable) updates Postgres and lets that same channel
+ * reflect the change back into `tables`, the same way it would on a second
+ * phone sitting at another table.
+ */
+interface TablesState {
+  tables: RestaurantTable[]
+  loading: boolean
+  initialized: boolean
+  init: () => void
+  seatReservation: (tableId: string, customerName: string, guestCount: number) => Promise<void>
+  markArrived: (tableId: string) => Promise<void>
+  transferTable: (fromId: string, toId: string) => Promise<void>
+  addTable: (label: string, seats: number) => Promise<void>
+}
+
+function mapRow(row: any): RestaurantTable {
+  return {
+    id: row.id,
+    label: row.label,
+    seats: row.seats,
+    status: row.status,
+    customerName: row.customer_name ?? undefined,
+    guestCount: row.guest_count ?? undefined,
+    seatedAt: row.seated_at ?? undefined,
+  }
+}
+
+export const useTablesStore = create<TablesState>((set, get) => ({
+  tables: [],
+  loading: true,
+  initialized: false,
+
+  init: () => {
+    if (get().initialized) return // zustand stores are singletons — only wire the subscription once
+    set({ initialized: true })
+
+    async function load() {
+      const { data, error } = await supabase
+        .from('restaurant_tables')
+        .select('*')
+        .eq('branch_id', CURRENT_BRANCH_ID)
+        .order('label')
+
+      if (error) {
+        console.error('[tablesStore] failed to load tables', error)
+        set({ loading: false })
+        return
+      }
+      set({ tables: (data ?? []).map(mapRow), loading: false })
+    }
+    load()
+
+    supabase
+      .channel(`tables:${CURRENT_BRANCH_ID}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'restaurant_tables', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` },
+        (payload) => {
+          set((state) => {
+            if (payload.eventType === 'DELETE') {
+              return { tables: state.tables.filter((t) => t.id !== (payload.old as any).id) }
+            }
+            const updated = mapRow(payload.new as any)
+            const exists = state.tables.some((t) => t.id === updated.id)
+            return {
+              tables: exists
+                ? state.tables.map((t) => (t.id === updated.id ? updated : t))
+                : [...state.tables, updated].sort((a, b) => a.label.localeCompare(b.label)),
+            }
+          })
+        }
+      )
+      .subscribe()
+  },
+
+  seatReservation: async (tableId, customerName, guestCount) => {
+    const { error } = await supabase
+      .from('restaurant_tables')
+      .update({ status: 'reserved', customer_name: customerName, guest_count: guestCount })
+      .eq('id', tableId)
+    if (error) console.error('[tablesStore] seatReservation failed', error)
+    // No manual setState here — the Realtime subscription above applies this
+    // same change to `tables` the moment Postgres confirms it.
+  },
+
+  markArrived: async (tableId) => {
+    const { error } = await supabase
+      .from('restaurant_tables')
+      .update({ status: 'occupied', seated_at: new Date().toISOString() })
+      .eq('id', tableId)
+    if (error) console.error('[tablesStore] markArrived failed', error)
+  },
+
+  transferTable: async (fromId, toId) => {
+    const from = get().tables.find((t) => t.id === fromId)
+    if (!from) return
+
+    const { error: toError } = await supabase
+      .from('restaurant_tables')
+      .update({
+        status: from.status,
+        customer_name: from.customerName ?? null,
+        guest_count: from.guestCount ?? null,
+        seated_at: from.seatedAt ?? null,
+      })
+      .eq('id', toId)
+    if (toError) {
+      console.error('[tablesStore] transferTable (target update) failed', toError)
+      return
+    }
+
+    const { error: fromError } = await supabase
+      .from('restaurant_tables')
+      .update({ status: 'needs_cleaning', customer_name: null, guest_count: null, seated_at: null })
+      .eq('id', fromId)
+    if (fromError) console.error('[tablesStore] transferTable (source reset) failed', fromError)
+  },
+
+  addTable: async (label, seats) => {
+    const { error } = await supabase
+      .from('restaurant_tables')
+      .insert({ branch_id: CURRENT_BRANCH_ID, label, seats, status: 'available' })
+    if (error) console.error('[tablesStore] addTable failed', error)
+  },
+}))
