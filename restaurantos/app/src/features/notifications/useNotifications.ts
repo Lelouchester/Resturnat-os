@@ -60,9 +60,9 @@ export function useNotifications(): AppNotification[] {
       )
 
     tickets
-      .filter((t) => t.status === 'ready' && minutesSince(t.firedAt) >= READY_TICKET_STALE_MINUTES)
+      .filter((t) => minutesSince(t.firedAt) >= READY_TICKET_STALE_MINUTES)
       .forEach((t) =>
-        list.push({ id: `ticket-ready-${t.id}`, tone: 'warning', message: `${t.tableLabel}'s order has been ready to serve for a while`, linkTo: '/kitchen' })
+        list.push({ id: `ticket-ready-${t.orderId}`, tone: 'warning', message: `${t.tableLabel}'s order has been waiting on the kitchen a while`, linkTo: '/kitchen' })
       )
 
     purchases

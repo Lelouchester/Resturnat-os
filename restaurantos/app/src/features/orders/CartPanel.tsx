@@ -184,7 +184,7 @@ export function CartPanel({
             disabled={billableCount === 0}
             onClick={onConfirm}
           >
-            Send to kitchen
+            Confirm order
           </Button>
         </div>
       </div>

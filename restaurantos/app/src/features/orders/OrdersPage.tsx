@@ -30,9 +30,12 @@ export function OrdersPage() {
   const tables = useTablesStore((s) => s.tables)
   const tablesLoading = useTablesStore((s) => s.loading)
   const initTables = useTablesStore((s) => s.init)
+  const updateGuestInfo = useTablesStore((s) => s.updateGuestInfo)
   const orders = useOrdersStore((s) => s.orders)
   const initOrders = useOrdersStore((s) => s.init)
   const sendItemsToKitchen = useOrdersStore((s) => s.sendItemsToKitchen)
+  const [guestNameDraft, setGuestNameDraft] = useState('')
+  const [editingGuestName, setEditingGuestName] = useState(false)
 
   useEffect(() => {
     initMenu()
@@ -120,6 +123,9 @@ export function OrdersPage() {
   }
 
   const existingOrder = orders.find((o) => o.tableId === activeTable && (o.status === 'open' || o.status === 'billing'))
+  const activeTableRow = tables.find((t) => t.id === activeTable)
+  const existingBillable = existingOrder?.items.filter((i) => i.status !== 'void') ?? []
+  const existingTotal = existingBillable.reduce((s, i) => s + (i.isComplimentary ? 0 : i.unitPrice * i.quantity), 0)
 
   return (
     <div className="flex h-full">
@@ -143,6 +149,45 @@ export function OrdersPage() {
             ))}
           </div>
         </div>
+
+        {/* Guest name + elapsed time for this table */}
+        <div className="px-4 md:px-6 pb-3 flex items-center gap-2 text-sm">
+          {editingGuestName ? (
+            <input
+              autoFocus
+              value={guestNameDraft}
+              onChange={(e) => setGuestNameDraft(e.target.value)}
+              onBlur={() => { updateGuestInfo(activeTable, guestNameDraft.trim()); setEditingGuestName(false) }}
+              onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+              placeholder="Guest name"
+              className="text-sm rounded-lg border border-ink/10 px-2.5 py-1.5 outline-none focus:border-ember"
+            />
+          ) : (
+            <button
+              onClick={() => { setGuestNameDraft(activeTableRow?.customerName ?? ''); setEditingGuestName(true) }}
+              className="text-ink/50 hover:text-ink font-medium"
+            >
+              {activeTableRow?.customerName ? `Guest: ${activeTableRow.customerName}` : '+ Add guest name'}
+            </button>
+          )}
+          {activeTableRow?.seatedAt && (
+            <span className="text-ink/30 text-xs">
+              · seated {Math.max(0, Math.round((Date.now() - new Date(activeTableRow.seatedAt).getTime()) / 60000))}m ago
+            </span>
+          )}
+        </div>
+
+        {/* Always-visible summary of what's already confirmed for this table — stays
+            put even after the working cart empties out, so nothing looks "gone". */}
+        {existingBillable.length > 0 && (
+          <div className="mx-4 md:mx-6 mb-3 rounded-xl bg-ink/[0.03] px-3.5 py-2.5 flex items-center justify-between">
+            <div className="text-xs">
+              <span className="font-semibold">{existingBillable.length} item{existingBillable.length === 1 ? '' : 's'} confirmed</span>
+              <span className="text-ink/40"> · Rs. {existingTotal}</span>
+            </div>
+            <button onClick={() => setCartOpen(true)} className="md:hidden text-xs font-semibold text-ember">View</button>
+          </div>
+        )}
 
         {/* Search */}
         <div className="px-4 md:px-6 pb-3">
@@ -225,7 +270,7 @@ export function OrdersPage() {
       <CartPanel
         lines={cart.lines}
         subtotal={cart.subtotal}
-        existingItems={existingOrder?.items.filter((i) => i.status !== 'void') ?? []}
+        existingItems={existingBillable}
         onAdjust={cart.adjustQuantity}
         onNote={cart.setNote}
         onRemove={cart.removeLine}
@@ -235,7 +280,7 @@ export function OrdersPage() {
           await sendItemsToKitchen(activeTable, cart.lines)
           cart.clear()
           setCartOpen(false)
-          setToast('Sent to kitchen')
+          setToast('Order confirmed')
           setTimeout(() => setToast(null), 2500)
         }}
         isOpen={cartOpen}

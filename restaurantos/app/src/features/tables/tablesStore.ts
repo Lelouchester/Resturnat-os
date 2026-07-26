@@ -19,6 +19,7 @@ interface TablesState {
   init: () => void
   seatReservation: (tableId: string, customerName: string, guestCount: number) => Promise<void>
   markArrived: (tableId: string) => Promise<void>
+  updateGuestInfo: (tableId: string, customerName: string, guestCount?: number) => Promise<void>
   addTable: (label: string, seats: number) => Promise<void>
 }
 
@@ -59,6 +60,14 @@ export const useTablesStore = create<TablesState>((set, get) => ({
     }
     load()
 
+    // Realtime can silently drop (phone screen locks, browser tab goes to
+    // the background, wifi blips) without an obvious error — when that
+    // happens the store would otherwise sit on stale data until a full page
+    // reload. Re-pulling on every "welcome back" closes that gap cheaply.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') load()
+    })
+
     supabase
       .channel(`tables:${CURRENT_BRANCH_ID}`)
       .on(
@@ -98,6 +107,13 @@ export const useTablesStore = create<TablesState>((set, get) => ({
       .update({ status: 'occupied', seated_at: new Date().toISOString() })
       .eq('id', tableId)
     if (error) console.error('[tablesStore] markArrived failed', error)
+  },
+
+  updateGuestInfo: async (tableId, customerName, guestCount) => {
+    const payload: Record<string, unknown> = { customer_name: customerName || null }
+    if (guestCount !== undefined) payload.guest_count = guestCount
+    const { error } = await supabase.from('restaurant_tables').update(payload).eq('id', tableId)
+    if (error) console.error('[tablesStore] updateGuestInfo failed', error)
   },
 
   addTable: async (label, seats) => {

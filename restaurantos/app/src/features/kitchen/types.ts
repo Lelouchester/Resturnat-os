@@ -1,19 +1,13 @@
-import type { OrderItemStatus } from '../orders/types'
+import type { OrderItemRow } from '../orders/types'
 
 /**
- * A single kitchen-board card — one order_item, with its table attached.
- * Items advance individually (pending → preparing → ready → served) rather
- * than as a whole fired batch, since a table's items don't all finish
- * cooking at once.
+ * One kitchen-board card per TABLE'S order — not per item. Whatever hasn't
+ * been served yet for that table shows up as a single ticket with one
+ * "Mark Served" action, matching how a real kitchen ticket reads.
  */
 export interface KitchenTicket {
-  id: string // order_item id
   orderId: string
   tableLabel: string
-  name: string
-  quantity: number
-  note?: string
-  isComplimentary: boolean
-  status: OrderItemStatus
-  firedAt: string
+  items: OrderItemRow[] // active items only — served/void already dropped
+  firedAt: string // earliest still-active item's created_at
 }

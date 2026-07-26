@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Flame, Gift } from 'lucide-react'
+import { Flame, Gift, Check } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import type { KitchenTicket } from './types'
 
@@ -14,15 +14,7 @@ function useElapsedMinutes(since: string) {
   return minutes
 }
 
-const ACTION_LABEL: Record<KitchenTicket['status'], string> = {
-  pending: 'Start preparing',
-  preparing: 'Mark ready',
-  ready: 'Serve',
-  served: 'Served',
-  void: 'Void',
-}
-
-export function TicketCard({ ticket, onAdvance }: { ticket: KitchenTicket; onAdvance: (id: string) => void }) {
+export function TicketCard({ ticket, onMarkServed }: { ticket: KitchenTicket; onMarkServed: (orderId: string, itemIds: string[]) => void }) {
   const minutes = useElapsedMinutes(ticket.firedAt)
   const urgent = minutes >= 12
   const warm = minutes >= 6
@@ -45,22 +37,26 @@ export function TicketCard({ ticket, onAdvance }: { ticket: KitchenTicket; onAdv
         </div>
       </div>
 
-      <div className="text-sm mb-4">
-        <span className="font-ticket font-semibold">{ticket.quantity}×</span>{' '}
-        <span className="font-medium">{ticket.name}</span>
-        {ticket.isComplimentary && (
-          <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-bold text-ember align-middle">
-            <Gift size={11} /> COMP
-          </span>
-        )}
-        {ticket.note && <div className="text-xs text-ember mt-0.5">📝 {ticket.note}</div>}
-      </div>
+      <ul className="space-y-1.5 mb-4">
+        {ticket.items.map((item) => (
+          <li key={item.id} className="text-sm">
+            <span className="font-ticket font-semibold">{item.quantity}×</span>{' '}
+            <span className="font-medium">{item.name}</span>
+            {item.isComplimentary && (
+              <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-bold text-ember align-middle">
+                <Gift size={11} /> COMP
+              </span>
+            )}
+            {item.note && <div className="text-xs text-ember pl-5">📝 {item.note}</div>}
+          </li>
+        ))}
+      </ul>
 
       <button
-        onClick={() => onAdvance(ticket.id)}
-        className="w-full rounded-xl py-2.5 text-sm font-semibold bg-ink text-paper hover:bg-black active:scale-[0.98] transition-all"
+        onClick={() => onMarkServed(ticket.orderId, ticket.items.map((i) => i.id))}
+        className="w-full flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-sm font-semibold bg-ink text-paper hover:bg-black active:scale-[0.98] transition-all"
       >
-        {ACTION_LABEL[ticket.status]}
+        <Check size={15} /> Mark served
       </button>
     </Card>
   )

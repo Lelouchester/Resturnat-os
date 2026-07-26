@@ -31,6 +31,7 @@ interface OrdersState {
   startOrGetOrder: (tableId: string) => Promise<string>
   sendItemsToKitchen: (tableId: string, lines: CartLine[]) => Promise<void>
   updateItemStatus: (itemId: string, status: OrderItemStatus) => Promise<void>
+  markItemsServed: (itemIds: string[]) => Promise<void>
   voidItem: (itemId: string, reason: string) => Promise<void>
   beginBilling: (tableId: string) => Promise<void>
   transferOrderTable: (fromTableId: string, toTableId: string) => Promise<void>
@@ -124,6 +125,11 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
 
     loadOpenOrders().then((orders) => set({ orders, loading: false }))
 
+    // Same safety net as tablesStore — don't rely on the websocket alone.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') loadOpenOrders().then((orders) => set({ orders }))
+    })
+
     // An order/order_items change can touch totals, statuses, and table
     // linkage all at once — reload rather than patch, same reasoning as
     // shiftStore.
@@ -203,6 +209,15 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       .update({ status, status_updated_at: new Date().toISOString() })
       .eq('id', itemId)
     if (error) console.error('[ordersStore] updateItemStatus failed', error)
+  },
+
+  markItemsServed: async (itemIds) => {
+    if (itemIds.length === 0) return
+    const { error } = await supabase
+      .from('order_items')
+      .update({ status: 'served', status_updated_at: new Date().toISOString() })
+      .in('id', itemIds)
+    if (error) console.error('[ordersStore] markItemsServed failed', error)
   },
 
   voidItem: async (itemId, reason) => {
