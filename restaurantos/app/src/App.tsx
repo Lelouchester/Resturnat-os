@@ -10,7 +10,7 @@ import { TablesPage } from './features/tables/TablesPage'
 import { OrdersPage } from './features/orders/OrdersPage'
 import { KitchenPage } from './features/kitchen/KitchenPage'
 import { BillingPage } from './features/billing/BillingPage'
-import { ShiftsPage } from './features/shifts/ShiftsPage'
+import { AccountsPage } from './features/shifts/AccountsPage'
 import { MenuPage } from './features/menu/MenuPage'
 import { InventoryPage } from './features/inventory/InventoryPage'
 import { PurchasingPage } from './features/purchasing/PurchasingPage'
@@ -69,7 +69,7 @@ function App() {
               <Route path="/orders" element={<OrdersPage />} />
               <Route path="/kitchen" element={<KitchenPage />} />
               <Route path="/billing" element={<BillingPage />} />
-              <Route path="/shifts" element={<ShiftsPage />} />
+              <Route path="/accounts" element={<AccountsPage />} />
               <Route path="/menu" element={<MenuPage />} />
               <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/purchasing" element={<PurchasingPage />} />

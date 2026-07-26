@@ -10,7 +10,7 @@ const NAV = [
   { to: '/orders', label: 'Orders', icon: ClipboardList },
   { to: '/kitchen', label: 'Kitchen', icon: ChefHat },
   { to: '/billing', label: 'Billing', icon: Receipt },
-  { to: '/shifts', label: 'Shift', icon: Clock },
+  { to: '/accounts', label: 'Accounts', icon: Clock },
   { to: '/menu', label: 'Menu', icon: BookOpen },
   { to: '/inventory', label: 'Inventory', icon: Boxes },
   { to: '/purchasing', label: 'Purchasing', icon: Truck },

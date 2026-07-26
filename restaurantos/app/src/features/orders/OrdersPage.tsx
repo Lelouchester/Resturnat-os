@@ -97,7 +97,7 @@ export function OrdersPage() {
           Orders can't be taken until the day's shift is started — count the drawer first.
         </p>
         <button
-          onClick={() => navigate('/shifts')}
+          onClick={() => navigate('/accounts')}
           className="rounded-xl bg-ink text-paper px-4 py-3 text-sm font-semibold"
         >
           Go start the shift

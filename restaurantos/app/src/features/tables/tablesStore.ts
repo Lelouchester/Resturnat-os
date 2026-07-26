@@ -35,6 +35,12 @@ function mapRow(row: any): RestaurantTable {
   }
 }
 
+// "Table 2" before "Table 10" — plain alphabetical sorting puts Table 10
+// right after Table 1 since it compares character by character.
+function byLabel(a: RestaurantTable, b: RestaurantTable) {
+  return a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' })
+}
+
 export const useTablesStore = create<TablesState>((set, get) => ({
   tables: [],
   loading: true,
@@ -49,14 +55,13 @@ export const useTablesStore = create<TablesState>((set, get) => ({
         .from('restaurant_tables')
         .select('*')
         .eq('branch_id', CURRENT_BRANCH_ID)
-        .order('label')
 
       if (error) {
         console.error('[tablesStore] failed to load tables', error)
         set({ loading: false })
         return
       }
-      set({ tables: (data ?? []).map(mapRow), loading: false })
+      set({ tables: (data ?? []).map(mapRow).sort(byLabel), loading: false })
     }
     load()
 
@@ -83,7 +88,7 @@ export const useTablesStore = create<TablesState>((set, get) => ({
             return {
               tables: exists
                 ? state.tables.map((t) => (t.id === updated.id ? updated : t))
-                : [...state.tables, updated].sort((a, b) => a.label.localeCompare(b.label)),
+                : [...state.tables, updated].sort(byLabel),
             }
           })
         }
