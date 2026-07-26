@@ -1,11 +1,20 @@
 import { useState } from 'react'
-import { Minus, Plus, X, StickyNote, Gift, Ban } from 'lucide-react'
+import { Minus, Plus, X, StickyNote, Gift, Ban, ChefHat } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
-import type { CartLine } from './types'
+import type { CartLine, OrderItemRow } from './types'
+
+const ITEM_STATUS_LABEL: Record<OrderItemRow['status'], string> = {
+  pending: 'Pending',
+  preparing: 'Preparing',
+  ready: 'Ready',
+  served: 'Served',
+  void: 'Void',
+}
 
 export function CartPanel({
   lines,
   subtotal,
+  existingItems = [],
   onAdjust,
   onNote,
   onRemove,
@@ -17,6 +26,7 @@ export function CartPanel({
 }: {
   lines: CartLine[]
   subtotal: number
+  existingItems?: OrderItemRow[]
   onAdjust: (key: string, delta: number) => void
   onNote: (key: string, note: string) => void
   onRemove: (key: string) => void
@@ -55,6 +65,19 @@ export function CartPanel({
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-2">
+          {existingItems.length > 0 && (
+            <div className="mb-2 pb-3 border-b border-ink/5">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-ink/40 mb-2">
+                <ChefHat size={12} /> Already sent to kitchen
+              </div>
+              {existingItems.map((it) => (
+                <div key={it.id} className="flex items-center justify-between text-sm py-1">
+                  <span className="text-ink/70">{it.quantity}× {it.name}</span>
+                  <span className="text-[11px] font-semibold text-ink/40">{ITEM_STATUS_LABEL[it.status]}</span>
+                </div>
+              ))}
+            </div>
+          )}
           {lines.length === 0 ? (
             <p className="text-sm text-ink/40 py-8 text-center">No items yet — tap something from the menu.</p>
           ) : (

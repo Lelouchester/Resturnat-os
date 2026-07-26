@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Flame } from 'lucide-react'
+import { Flame, Gift } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import type { KitchenTicket } from './types'
 
@@ -18,6 +18,8 @@ const ACTION_LABEL: Record<KitchenTicket['status'], string> = {
   pending: 'Start preparing',
   preparing: 'Mark ready',
   ready: 'Serve',
+  served: 'Served',
+  void: 'Void',
 }
 
 export function TicketCard({ ticket, onAdvance }: { ticket: KitchenTicket; onAdvance: (id: string) => void }) {
@@ -43,15 +45,16 @@ export function TicketCard({ ticket, onAdvance }: { ticket: KitchenTicket; onAdv
         </div>
       </div>
 
-      <ul className="space-y-1.5 mb-4">
-        {ticket.items.map((item, i) => (
-          <li key={i} className="text-sm">
-            <span className="font-ticket font-semibold">{item.quantity}×</span>{' '}
-            <span className="font-medium">{item.name}</span>
-            {item.note && <div className="text-xs text-ember pl-5">📝 {item.note}</div>}
-          </li>
-        ))}
-      </ul>
+      <div className="text-sm mb-4">
+        <span className="font-ticket font-semibold">{ticket.quantity}×</span>{' '}
+        <span className="font-medium">{ticket.name}</span>
+        {ticket.isComplimentary && (
+          <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-bold text-ember align-middle">
+            <Gift size={11} /> COMP
+          </span>
+        )}
+        {ticket.note && <div className="text-xs text-ember mt-0.5">📝 {ticket.note}</div>}
+      </div>
 
       <button
         onClick={() => onAdvance(ticket.id)}

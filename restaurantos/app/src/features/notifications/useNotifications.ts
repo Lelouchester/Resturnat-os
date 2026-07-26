@@ -2,7 +2,8 @@ import { useMemo } from 'react'
 import { useInventoryStore } from '../inventory/inventoryStore'
 import { useCustomersStore } from '../customers/customersStore'
 import { useReservationsStore } from '../reservations/reservationsStore'
-import { useKitchenStore } from '../kitchen/kitchenStore'
+import { useOrdersStore } from '../orders/ordersStore'
+import { buildKitchenTickets } from '../kitchen/selectors'
 import { usePurchasingStore } from '../purchasing/purchasingStore'
 import { useSettingsStore } from '../settings/settingsStore'
 import { useDismissedStore } from './dismissedStore'
@@ -21,7 +22,8 @@ export function useNotifications(): AppNotification[] {
   const inventoryItems = useInventoryStore((s) => s.items)
   const customers = useCustomersStore((s) => s.customers)
   const reservations = useReservationsStore((s) => s.reservations)
-  const tickets = useKitchenStore((s) => s.tickets)
+  const orders = useOrdersStore((s) => s.orders)
+  const tickets = useMemo(() => buildKitchenTickets(orders), [orders])
   const purchases = usePurchasingStore((s) => s.purchases)
   const dueReminderDays = useSettingsStore((s) => s.dueReminderDays)
   const dismissedIds = useDismissedStore((s) => s.dismissedIds)

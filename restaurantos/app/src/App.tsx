@@ -4,6 +4,8 @@ import { Suspense, lazy, useEffect } from 'react'
 import { AppShell } from './shared/ui/AppShell'
 import { useSettingsStore } from './features/settings/settingsStore'
 import { useShiftStore } from './features/shifts/shiftStore'
+import { useOrdersStore } from './features/orders/ordersStore'
+import { useAccountsStore } from './features/accounts/accountsStore'
 import { TablesPage } from './features/tables/TablesPage'
 import { OrdersPage } from './features/orders/OrdersPage'
 import { KitchenPage } from './features/kitchen/KitchenPage'
@@ -30,6 +32,8 @@ function App() {
   const theme = useSettingsStore((s) => s.theme)
   const initPaymentMethods = useSettingsStore((s) => s.initPaymentMethods)
   const initShift = useShiftStore((s) => s.init)
+  const initOrders = useOrdersStore((s) => s.init)
+  const initAccounts = useAccountsStore((s) => s.init)
 
   // The whole app reads color from CSS variables (--color-ink, --color-paper,
   // --color-surface), so flipping this one attribute is the entire dark mode
@@ -41,11 +45,16 @@ function App() {
   // Payment methods and shift status are shared across multiple screens —
   // loaded once here rather than separately on each one (Orders in
   // particular needs to know if a shift is open even if it's the very
-  // first screen someone opens).
+  // first screen someone opens). Orders is loaded globally too since
+  // Notifications (visible in the header everywhere) reads kitchen tickets
+  // derived from it. Accounts is initialized after payment methods since it
+  // resolves balances through them.
   useEffect(() => {
     initPaymentMethods()
     initShift()
-  }, [initPaymentMethods, initShift])
+    initOrders()
+    initAccounts()
+  }, [initPaymentMethods, initShift, initOrders, initAccounts])
 
   return (
     <QueryClientProvider client={queryClient}>

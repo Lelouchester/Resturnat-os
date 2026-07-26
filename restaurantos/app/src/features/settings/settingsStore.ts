@@ -104,10 +104,22 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   addPaymentMethod: async (label) => {
     const key = label.toLowerCase().replace(/\s+/g, '-')
     const sortOrder = get().paymentMethods.length + 1
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('payment_methods')
       .insert({ branch_id: CURRENT_BRANCH_ID, key, label, sort_order: sortOrder })
-    if (error) console.error('[settingsStore] addPaymentMethod failed', error)
+      .select()
+      .single()
+    if (error || !data) {
+      console.error('[settingsStore] addPaymentMethod failed', error)
+      return
+    }
+    // Every payment method needs a matching `accounts` row (balance starts
+    // at 0) or Billing/Purchasing have nowhere to deposit/withdraw money
+    // for it — easy to forget since it's a second table.
+    const { error: acctError } = await supabase
+      .from('accounts')
+      .insert({ branch_id: CURRENT_BRANCH_ID, payment_method_id: data.id, balance: 0 })
+    if (acctError) console.error('[settingsStore] failed to create matching account row', acctError)
   },
 
   removePaymentMethod: async (key) => {

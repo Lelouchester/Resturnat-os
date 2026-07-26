@@ -1,28 +1,57 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Printer, Share2, Search, UserPlus, X, Merge } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
-import { DEMO_BILLABLE_TABLES } from './demoBills'
 import { ReceiptView } from './ReceiptView'
 import { useSettingsStore } from '../settings/settingsStore'
-import { useAccountsStore } from '../accounts/accountsStore'
+import { useOrdersStore } from '../orders/ordersStore'
+import { useTablesStore } from '../tables/tablesStore'
 import { useCustomersStore } from '../customers/customersStore'
+import type { LiveOrder } from '../orders/types'
 
 export function BillingPage() {
   const paymentMethods = useSettingsStore((s) => s.paymentMethods)
-  const deposit = useAccountsStore((s) => s.deposit)
   const customers = useCustomersStore((s) => s.customers)
   const addCustomer = useCustomersStore((s) => s.addCustomer)
   const recordVisit = useCustomersStore((s) => s.recordVisit)
 
-  const [activeId, setActiveId] = useState(DEMO_BILLABLE_TABLES[0].id)
-  const table = DEMO_BILLABLE_TABLES.find((t) => t.id === activeId)!
-  const [mergedIds, setMergedIds] = useState<string[]>([])
-  const mergedTables = mergedIds.map((id) => DEMO_BILLABLE_TABLES.find((t) => t.id === id)!).filter(Boolean)
-  const effectiveLines = useMemo(
-    () => [...table.lines, ...mergedTables.flatMap((t) => t.lines)],
-    [table, mergedTables]
+  const orders = useOrdersStore((s) => s.orders)
+  const ordersLoading = useOrdersStore((s) => s.loading)
+  const initOrders = useOrdersStore((s) => s.init)
+  const beginBilling = useOrdersStore((s) => s.beginBilling)
+  const mergeOrders = useOrdersStore((s) => s.mergeOrders)
+  const unmergeOrder = useOrdersStore((s) => s.unmergeOrder)
+  const completePayment = useOrdersStore((s) => s.completePayment)
+  const initTables = useTablesStore((s) => s.init)
+
+  useEffect(() => {
+    initOrders()
+    initTables()
+  }, [initOrders, initTables])
+
+  // Anything open or already being closed out, and not already folded into
+  // another table's bill — that's the billable list across the top.
+  const billableOrders = useMemo(
+    () => orders.filter((o) => (o.status === 'open' || o.status === 'billing') && !o.mergedIntoOrderId),
+    [orders]
   )
+
+  const [activeTableId, setActiveTableId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!activeTableId && billableOrders.length > 0) setActiveTableId(billableOrders[0].tableId)
+  }, [activeTableId, billableOrders])
+
+  const order = billableOrders.find((o) => o.tableId === activeTableId)
+  // Other tables whose bills have been merged into this one (via the Floor
+  // plan's Merge action, or right here) — their items fold into the total.
+  const mergedInOrders = useMemo(
+    () => (order ? orders.filter((o) => o.mergedIntoOrderId === order.id) : []),
+    [orders, order]
+  )
+  const effectiveLines = useMemo(() => {
+    if (!order) return []
+    return [...order.items, ...mergedInOrders.flatMap((o) => o.items)].filter((i) => i.status !== 'void')
+  }, [order, mergedInOrders])
 
   const [discountPct, setDiscountPct] = useState(0)
   const [serviceChargePct, setServiceChargePct] = useState(10)
@@ -38,7 +67,10 @@ export function BillingPage() {
   const [customerId, setCustomerId] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
 
-  const subtotal = useMemo(() => effectiveLines.reduce((s, l) => s + l.unitPrice * l.quantity, 0), [effectiveLines])
+  const subtotal = useMemo(
+    () => effectiveLines.reduce((s, l) => s + (l.isComplimentary ? 0 : l.unitPrice * l.quantity), 0),
+    [effectiveLines]
+  )
   const discount = Math.round(subtotal * (discountPct / 100))
   const afterDiscount = subtotal - discount
   const serviceCharge = Math.round(afterDiscount * (serviceChargePct / 100))
@@ -56,15 +88,19 @@ export function BillingPage() {
   const paid = paymentMethods.reduce((s, m) => s + (amounts[m.key] || 0), 0)
   const remaining = total - paid // can go negative (change due)
 
-  const matchingCustomers = useMemo(() => {
-    if (!customerSearch.trim()) return customers
-    const q = customerSearch.toLowerCase()
-    return customers.filter((c) => c.name?.toLowerCase().includes(q) || c.phone?.includes(q))
-  }, [customers, customerSearch])
-  const selectedCustomer = customers.find((c) => c.id === customerId)
-
+  // Auto-balance: typing an amount into one method fills whatever's left
+  // into the next empty method automatically, so splitting a bill across
+  // two payment types doesn't need mental math.
   function setAmount(key: string, value: number) {
-    setAmounts((cur) => ({ ...cur, [key]: Math.max(0, value) }))
+    setAmounts((cur) => {
+      const next = { ...cur, [key]: Math.max(0, value) }
+      const stillOwed = total - paymentMethods.reduce((s, m) => s + (next[m.key] || 0), 0)
+      if (stillOwed > 0) {
+        const autoTarget = paymentMethods.find((m) => m.key !== key && !next[m.key])
+        if (autoTarget) next[autoTarget.key] = stillOwed
+      }
+      return next
+    })
   }
   function payFullWith(key: string) {
     const next: Record<string, number> = {}
@@ -72,24 +108,42 @@ export function BillingPage() {
     next[key] = total
     setAmounts(next)
   }
-  function switchTable(id: string) {
-    setActiveId(id)
+
+  function switchTable(tableId: string) {
+    setActiveTableId(tableId)
     setAmounts({})
     setSplitGuests(1)
-    setMergedIds([])
+    setCustomerId(null)
+    beginBilling(tableId)
   }
+
   function quickAddWalkIn() {
     const id = addCustomer(customerSearch.trim() || undefined, undefined)
     setCustomerId(id)
     setPickerOpen(false)
   }
 
-  function completePayment() {
-    // Real money movement: deposit whatever was actually collected into
-    // each account — this is the same balance Purchasing withdraws from.
-    paymentMethods.forEach((m) => {
-      const amt = amounts[m.key] || 0
-      if (amt > 0) deposit(m.key, amt)
+  const matchingCustomers = useMemo(() => {
+    if (!customerSearch.trim()) return customers
+    const q = customerSearch.toLowerCase()
+    return customers.filter((c) => c.name?.toLowerCase().includes(q) || c.phone?.includes(q))
+  }, [customers, customerSearch])
+  const selectedCustomer = customers.find((c) => c.id === customerId)
+
+  async function handleCompletePayment() {
+    if (!order) return
+    await completePayment({
+      orderId: order.id,
+      payments: paymentMethods.map((m) => ({ methodKey: m.key, amount: amounts[m.key] || 0 })),
+      subtotal,
+      discountAmount: discount,
+      serviceCharge,
+      taxAmount: tax,
+      tipAmount: tip,
+      total,
+      splitGuestCount: splitGuests,
+      customerId: customerId ?? undefined,
+      mergedOrderIds: mergedInOrders.map((o) => o.id),
     })
 
     if (customerId) {
@@ -99,6 +153,28 @@ export function BillingPage() {
 
     setToast(remaining > 0 ? 'Marked as due' : remaining < 0 ? 'Payment completed — change due' : 'Payment completed')
     setTimeout(() => setToast(null), 2500)
+
+    // Move on to the next table waiting to be closed out, instead of
+    // sitting on a bill that's already settled.
+    const paidTableId = order.tableId
+    const next = billableOrders.find((o) => o.tableId !== paidTableId && !mergedInOrders.some((m) => m.id === o.id))
+    setActiveTableId(next ? next.tableId : null)
+    setAmounts({})
+    setSplitGuests(1)
+    setCustomerId(null)
+  }
+
+  if (ordersLoading) {
+    return <div className="p-6 max-w-4xl mx-auto pt-10 h-64 rounded-2xl bg-ink/5 animate-pulse" />
+  }
+
+  if (!order) {
+    return (
+      <div className="p-6 max-w-sm mx-auto text-center pt-20">
+        <div className="font-ticket text-lg font-bold mb-2">No tables to bill</div>
+        <p className="text-sm text-ink/50">Once a table has an order, it'll show up here to close out.</p>
+      </div>
+    )
   }
 
   return (
@@ -110,16 +186,18 @@ export function BillingPage() {
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-4">
-        {DEMO_BILLABLE_TABLES.map((t) => (
+        {billableOrders.map((o) => (
           <button
-            key={t.id}
-            onClick={() => switchTable(t.id)}
+            key={o.tableId}
+            onClick={() => switchTable(o.tableId)}
             className={`shrink-0 rounded-xl px-3.5 py-2 text-left border transition-colors ${
-              activeId === t.id ? 'bg-ink text-paper border-ink' : 'bg-surface text-ink border-ink/10'
+              activeTableId === o.tableId ? 'bg-ink text-paper border-ink' : 'bg-surface text-ink border-ink/10'
             }`}
           >
-            <div className="font-ticket text-sm font-bold leading-none">{t.label}</div>
-            <div className={`text-[11px] mt-0.5 ${activeId === t.id ? 'text-paper/60' : 'text-ink/40'}`}>{t.customerName}</div>
+            <div className="font-ticket text-sm font-bold leading-none">{o.tableLabel}</div>
+            <div className={`text-[11px] mt-0.5 ${activeTableId === o.tableId ? 'text-paper/60' : 'text-ink/40'}`}>
+              {o.items.filter((i) => i.status !== 'void').length} item{o.items.length === 1 ? '' : 's'}
+            </div>
           </button>
         ))}
       </div>
@@ -170,10 +248,11 @@ export function BillingPage() {
       </Card>
 
       <MergeTablesCard
-        activeId={activeId}
-        mergedIds={mergedIds}
-        onMerge={(id) => setMergedIds((cur) => [...cur, id])}
-        onUnmerge={(id) => setMergedIds((cur) => cur.filter((x) => x !== id))}
+        order={order}
+        mergedInOrders={mergedInOrders}
+        billableOrders={billableOrders}
+        onMerge={(fromTableId) => mergeOrders(fromTableId, order.tableId)}
+        onUnmerge={(orderId) => unmergeOrder(orderId)}
       />
 
       <div className="grid md:grid-cols-2 gap-4">
@@ -181,12 +260,16 @@ export function BillingPage() {
         <Card className="p-4">
           <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-3">Items</div>
           <div className="space-y-2 mb-4">
-            {effectiveLines.map((l, i) => (
-              <div key={i} className="flex justify-between text-sm">
-                <span>{l.quantity}× {l.name}</span>
-                <span className="font-ticket font-semibold">{l.unitPrice * l.quantity}</span>
+            {effectiveLines.map((l) => (
+              <div key={l.id} className="flex justify-between text-sm">
+                <span>
+                  {l.quantity}× {l.name}
+                  {l.isComplimentary && <span className="ml-1.5 text-[10px] font-bold text-ember align-middle">COMP</span>}
+                </span>
+                <span className="font-ticket font-semibold">{l.isComplimentary ? 0 : l.unitPrice * l.quantity}</span>
               </div>
             ))}
+            {effectiveLines.length === 0 && <p className="text-xs text-ink/40">Nothing sent to the kitchen for this table yet.</p>}
           </div>
 
           <div className="border-t border-ink/5 pt-3 space-y-3">
@@ -249,7 +332,7 @@ export function BillingPage() {
               </span>
             </div>
 
-            {/* Rows generated from Settings' payment method list — add one there, it shows up here automatically */}
+            {/* Rows generated from Settings' payment method list — add one there, it shows up here automatically. Typing an amount auto-fills the rest into the next empty method. */}
             <div className="space-y-2 mb-3">
               {paymentMethods.map((m) => (
                 <div key={m.key} className="flex items-center gap-2">
@@ -279,7 +362,7 @@ export function BillingPage() {
             <Button
               variant="secondary"
               className="flex-1 flex items-center justify-center gap-1.5"
-              onClick={() => { navigator.clipboard?.writeText(`${table.label} — Rs. ${total} total`); setToast('Receipt summary copied') ; setTimeout(() => setToast(null), 2000)}}
+              onClick={() => { navigator.clipboard?.writeText(`${order.tableLabel} — Rs. ${total} total`); setToast('Receipt summary copied') ; setTimeout(() => setToast(null), 2000)}}
             >
               <Share2 size={15} /> Share
             </Button>
@@ -287,7 +370,7 @@ export function BillingPage() {
           <Button
             className="mt-2"
             disabled={paid === 0}
-            onClick={completePayment}
+            onClick={handleCompletePayment}
           >
             {remaining > 0 ? `Mark Rs. ${remaining} as due & close` : 'Complete payment'}
           </Button>
@@ -301,9 +384,9 @@ export function BillingPage() {
       )}
     </div>
     <ReceiptView
-      tableLabel={table.label}
-      customerName={table.customerName}
-      lines={table.lines}
+      tableLabel={order.tableLabel}
+      customerName={selectedCustomer?.name ?? 'Walk-in'}
+      lines={effectiveLines.map((l) => ({ name: l.name, quantity: l.quantity, unitPrice: l.isComplimentary ? 0 : l.unitPrice }))}
       subtotal={subtotal}
       discount={discount}
       serviceCharge={serviceCharge}
@@ -317,50 +400,49 @@ export function BillingPage() {
 }
 
 function MergeTablesCard({
-  activeId,
-  mergedIds,
+  order,
+  mergedInOrders,
+  billableOrders,
   onMerge,
   onUnmerge,
 }: {
-  activeId: string
-  mergedIds: string[]
-  onMerge: (id: string) => void
-  onUnmerge: (id: string) => void
+  order: LiveOrder
+  mergedInOrders: LiveOrder[]
+  billableOrders: LiveOrder[]
+  onMerge: (fromTableId: string) => void
+  onUnmerge: (orderId: string) => void
 }) {
   const [picking, setPicking] = useState(false)
-  const mergeable = DEMO_BILLABLE_TABLES.filter((t) => t.id !== activeId && !mergedIds.includes(t.id))
+  const mergeable = billableOrders.filter((o) => o.id !== order.id && !mergedInOrders.some((m) => m.id === o.id))
 
   return (
     <Card className="p-3 mb-4">
-      {mergedIds.length === 0 && !picking ? (
+      {mergedInOrders.length === 0 && !picking ? (
         <button onClick={() => setPicking(true)} className="flex items-center gap-2 text-sm text-ink/50">
           <Merge size={15} /> Merge with another table (optional)
         </button>
       ) : (
         <div>
           <div className="flex flex-wrap gap-1.5 mb-2">
-            {mergedIds.map((id) => {
-              const t = DEMO_BILLABLE_TABLES.find((x) => x.id === id)!
-              return (
-                <span key={id} className="flex items-center gap-1.5 text-xs font-semibold bg-status-reserved-bg text-status-reserved rounded-full px-2.5 py-1">
-                  {t.label}
-                  <button onClick={() => onUnmerge(id)} className="hover:text-status-cleaning"><X size={11} /></button>
-                </span>
-              )
-            })}
+            {mergedInOrders.map((o) => (
+              <span key={o.id} className="flex items-center gap-1.5 text-xs font-semibold bg-status-reserved-bg text-status-reserved rounded-full px-2.5 py-1">
+                {o.tableLabel}
+                <button onClick={() => onUnmerge(o.id)} className="hover:text-status-cleaning"><X size={11} /></button>
+              </span>
+            ))}
           </div>
           {picking ? (
             mergeable.length === 0 ? (
               <p className="text-xs text-ink/40">No other billable tables to merge in.</p>
             ) : (
               <div className="flex gap-1.5 flex-wrap">
-                {mergeable.map((t) => (
+                {mergeable.map((o) => (
                   <button
-                    key={t.id}
-                    onClick={() => { onMerge(t.id); setPicking(false) }}
+                    key={o.id}
+                    onClick={() => { onMerge(o.tableId); setPicking(false) }}
                     className="text-xs font-semibold rounded-full border border-ink/10 px-2.5 py-1 hover:bg-ink/5"
                   >
-                    + {t.label}
+                    + {o.tableLabel}
                   </button>
                 ))}
               </div>

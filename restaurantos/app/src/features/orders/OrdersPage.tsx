@@ -4,25 +4,19 @@ import { useMenuStore } from '../menu/menuStore'
 import { effectivePrice } from '../menu/pricing'
 import { useCart } from './useCart'
 import { CartPanel } from './CartPanel'
-import { useKitchenStore } from '../kitchen/kitchenStore'
+import { useOrdersStore } from './ordersStore'
+import { useTablesStore } from '../tables/tablesStore'
 import { useShiftStore } from '../shifts/shiftStore'
 import { useRepeatOrderStore } from './repeatOrderStore'
-import { useNavigate } from 'react-router-dom'
-
-const OPEN_TABLES = [
-  { id: '1', label: 'Table 1', customer: 'Rai family' },
-  { id: '4', label: 'Table 4', customer: 'Gurung' },
-  { id: '6', label: 'Table 6', customer: 'Karki party' },
-]
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 export function OrdersPage() {
-  const [activeTable, setActiveTable] = useState(OPEN_TABLES[0].id)
+  const [searchParams, setSearchParams] = useSearchParams()
   const [activeCategory, setActiveCategory] = useState<string>('favorites')
   const [search, setSearch] = useState('')
   const [cartOpen, setCartOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const cart = useCart()
-  const fireTicket = useKitchenStore((s) => s.fireTicket)
   const shift = useShiftStore((s) => s.shift)
   const shiftLoading = useShiftStore((s) => s.loading)
   const categories = useMenuStore((s) => s.categories)
@@ -33,9 +27,32 @@ export function OrdersPage() {
   const clearPendingRepeat = useRepeatOrderStore((s) => s.clear)
   const navigate = useNavigate()
 
+  const tables = useTablesStore((s) => s.tables)
+  const tablesLoading = useTablesStore((s) => s.loading)
+  const initTables = useTablesStore((s) => s.init)
+  const orders = useOrdersStore((s) => s.orders)
+  const initOrders = useOrdersStore((s) => s.init)
+  const sendItemsToKitchen = useOrdersStore((s) => s.sendItemsToKitchen)
+
   useEffect(() => {
     initMenu()
-  }, [initMenu])
+    initTables()
+    initOrders()
+  }, [initMenu, initTables, initOrders])
+
+  // Tabs across the top: any table already in use, plus whichever table was
+  // just tapped from the Floor screen (even if it's still "available" — that's
+  // how a brand new order gets started).
+  const tableFromUrl = searchParams.get('table')
+  const openTables = useMemo(
+    () => tables.filter((t) => t.status === 'occupied' || t.status === 'billing' || t.id === tableFromUrl),
+    [tables, tableFromUrl]
+  )
+  const activeTable = tableFromUrl ?? openTables[0]?.id
+
+  function setActiveTable(id: string) {
+    setSearchParams({ table: id })
+  }
 
   // Coming from "Repeat this order" on a customer's visit history — match
   // each remembered item name against the live menu and add what's found.
@@ -86,13 +103,31 @@ export function OrdersPage() {
     )
   }
 
+  if (tablesLoading) {
+    return <div className="p-6 max-w-sm mx-auto pt-20 h-40 rounded-2xl bg-ink/5 animate-pulse" />
+  }
+
+  if (!activeTable) {
+    return (
+      <div className="p-6 max-w-sm mx-auto text-center pt-20">
+        <div className="font-ticket text-lg font-bold mb-2">No table selected</div>
+        <p className="text-sm text-ink/50 mb-5">Tap a table on the Floor to start or continue its order.</p>
+        <button onClick={() => navigate('/tables')} className="rounded-xl bg-ink text-paper px-4 py-3 text-sm font-semibold">
+          Go to Floor
+        </button>
+      </div>
+    )
+  }
+
+  const existingOrder = orders.find((o) => o.tableId === activeTable && (o.status === 'open' || o.status === 'billing'))
+
   return (
     <div className="flex h-full">
       <div className="flex-1 flex flex-col min-w-0 pb-24 md:pb-0 min-h-0">
         {/* Table selector */}
         <div className="px-4 md:px-6 pt-4 md:pt-6">
           <div className="flex gap-2 overflow-x-auto pb-3">
-            {OPEN_TABLES.map((t) => (
+            {openTables.map((t) => (
               <button
                 key={t.id}
                 onClick={() => setActiveTable(t.id)}
@@ -101,7 +136,9 @@ export function OrdersPage() {
                 }`}
               >
                 <div className="font-ticket text-sm font-bold leading-none">{t.label}</div>
-                <div className={`text-[11px] mt-0.5 ${activeTable === t.id ? 'text-paper/60' : 'text-ink/40'}`}>{t.customer}</div>
+                <div className={`text-[11px] mt-0.5 ${activeTable === t.id ? 'text-paper/60' : 'text-ink/40'}`}>
+                  {t.customerName ?? (t.status === 'available' ? 'New order' : t.status)}
+                </div>
               </button>
             ))}
           </div>
@@ -188,19 +225,14 @@ export function OrdersPage() {
       <CartPanel
         lines={cart.lines}
         subtotal={cart.subtotal}
+        existingItems={existingOrder?.items.filter((i) => i.status !== 'void') ?? []}
         onAdjust={cart.adjustQuantity}
         onNote={cart.setNote}
         onRemove={cart.removeLine}
         onVoid={cart.markVoid}
         onComplimentary={cart.markComplimentary}
-        onConfirm={() => {
-          const table = OPEN_TABLES.find((t) => t.id === activeTable)
-          fireTicket(
-            table?.label ?? 'Table',
-            cart.lines
-              .filter((l) => l.status !== 'void') // voided items never reach the kitchen
-              .map((l) => ({ name: l.status === 'complimentary' ? `${l.name} (COMP)` : l.name, quantity: l.quantity, note: l.note }))
-          )
+        onConfirm={async () => {
+          await sendItemsToKitchen(activeTable, cart.lines)
           cart.clear()
           setCartOpen(false)
           setToast('Sent to kitchen')

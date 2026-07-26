@@ -7,9 +7,10 @@ import type { RestaurantTable } from './types'
  * Real data now — this is the first screen wired to Supabase instead of
  * in-memory demo state. `init()` loads the branch's tables once and opens a
  * Realtime channel; every write below (seatReservation, markArrived,
- * transferTable, addTable) updates Postgres and lets that same channel
- * reflect the change back into `tables`, the same way it would on a second
- * phone sitting at another table.
+ * addTable) updates Postgres and lets that same channel reflect the change
+ * back into `tables`, the same way it would on a second phone sitting at
+ * another table. Moving/merging a table's order lives in ordersStore now,
+ * since that has to touch orders as well as the table row.
  */
 interface TablesState {
   tables: RestaurantTable[]
@@ -18,7 +19,6 @@ interface TablesState {
   init: () => void
   seatReservation: (tableId: string, customerName: string, guestCount: number) => Promise<void>
   markArrived: (tableId: string) => Promise<void>
-  transferTable: (fromId: string, toId: string) => Promise<void>
   addTable: (label: string, seats: number) => Promise<void>
 }
 
@@ -98,31 +98,6 @@ export const useTablesStore = create<TablesState>((set, get) => ({
       .update({ status: 'occupied', seated_at: new Date().toISOString() })
       .eq('id', tableId)
     if (error) console.error('[tablesStore] markArrived failed', error)
-  },
-
-  transferTable: async (fromId, toId) => {
-    const from = get().tables.find((t) => t.id === fromId)
-    if (!from) return
-
-    const { error: toError } = await supabase
-      .from('restaurant_tables')
-      .update({
-        status: from.status,
-        customer_name: from.customerName ?? null,
-        guest_count: from.guestCount ?? null,
-        seated_at: from.seatedAt ?? null,
-      })
-      .eq('id', toId)
-    if (toError) {
-      console.error('[tablesStore] transferTable (target update) failed', toError)
-      return
-    }
-
-    const { error: fromError } = await supabase
-      .from('restaurant_tables')
-      .update({ status: 'needs_cleaning', customer_name: null, guest_count: null, seated_at: null })
-      .eq('id', fromId)
-    if (fromError) console.error('[tablesStore] transferTable (source reset) failed', fromError)
   },
 
   addTable: async (label, seats) => {

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, X, CalendarClock, ArrowRightLeft } from 'lucide-react'
+import { Plus, X, CalendarClock, ArrowRightLeft, Merge } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { TableCard } from './TableCard'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
 import { useTablesStore } from './tablesStore'
+import { useOrdersStore } from '../orders/ordersStore'
 import { useReservationsStore } from '../reservations/reservationsStore'
 
 const FILTERS = ['All', 'Available', 'Occupied', 'Reserved', 'Billing'] as const
@@ -12,17 +14,22 @@ export function TablesPage() {
   const [view, setView] = useState<'floor' | 'reservations'>('floor')
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('All')
   const [transferringId, setTransferringId] = useState<string | null>(null)
+  const [mergingId, setMergingId] = useState<string | null>(null)
   const [addingTable, setAddingTable] = useState(false)
+  const navigate = useNavigate()
 
   const tables = useTablesStore((s) => s.tables)
   const loading = useTablesStore((s) => s.loading)
   const init = useTablesStore((s) => s.init)
-  const transferTable = useTablesStore((s) => s.transferTable)
   const addTable = useTablesStore((s) => s.addTable)
+  const initOrders = useOrdersStore((s) => s.init)
+  const transferOrderTable = useOrdersStore((s) => s.transferOrderTable)
+  const mergeOrders = useOrdersStore((s) => s.mergeOrders)
 
   useEffect(() => {
     init()
-  }, [init])
+    initOrders()
+  }, [init, initOrders])
 
   const visibleTables = useMemo(() => {
     if (filter === 'All') return tables
@@ -32,11 +39,14 @@ export function TablesPage() {
 
   const occupiedCount = tables.filter((t) => t.status === 'occupied').length
 
+  // Tapping a table is the primary action now — it opens Orders for that
+  // table, whether that means starting a fresh order or adding to one
+  // already in progress. Move / Merge live as their own small buttons on
+  // the card so they don't get triggered by accident.
   function handleSelectTable(id: string) {
     const table = tables.find((t) => t.id === id)
-    if (table && (table.status === 'occupied' || table.status === 'billing')) {
-      setTransferringId(id)
-    }
+    if (!table || table.status === 'disabled') return
+    navigate(`/orders?table=${id}`)
   }
 
   return (
@@ -98,7 +108,15 @@ export function TablesPage() {
                 No tables yet — add one, or check that Supabase is connected and seeded.
               </p>
             ) : (
-              visibleTables.map((t) => <TableCard key={t.id} table={t} onSelect={handleSelectTable} />)
+              visibleTables.map((t) => (
+                <TableCard
+                  key={t.id}
+                  table={t}
+                  onSelect={handleSelectTable}
+                  onMove={setTransferringId}
+                  onMerge={setMergingId}
+                />
+              ))
             )}
           </div>
         </>
@@ -111,7 +129,16 @@ export function TablesPage() {
           fromId={transferringId}
           tables={tables}
           onClose={() => setTransferringId(null)}
-          onConfirm={(toId) => { transferTable(transferringId, toId); setTransferringId(null) }}
+          onConfirm={(toId) => { transferOrderTable(transferringId, toId); setTransferringId(null) }}
+        />
+      )}
+
+      {mergingId && (
+        <MergeModal
+          fromId={mergingId}
+          tables={tables}
+          onClose={() => setMergingId(null)}
+          onConfirm={(intoId) => { mergeOrders(mergingId, intoId); setMergingId(null) }}
         />
       )}
 
@@ -156,6 +183,53 @@ function TransferModal({
                 className="w-full text-left rounded-xl border border-ink/10 px-3.5 py-2.5 text-sm font-semibold hover:bg-ink/5"
               >
                 {t.label} <span className="text-ink/40 font-normal">· {t.seats} seats</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function MergeModal({
+  fromId,
+  tables,
+  onClose,
+  onConfirm,
+}: {
+  fromId: string
+  tables: ReturnType<typeof useTablesStore.getState>['tables']
+  onClose: () => void
+  onConfirm: (intoId: string) => void
+}) {
+  const from = tables.find((t) => t.id === fromId)!
+  // Any other table already carrying an order can receive the merge — the
+  // guests physically stay where they are, only the bill combines.
+  const mergeable = tables.filter((t) => t.id !== fromId && (t.status === 'occupied' || t.status === 'billing'))
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-ticket text-lg font-bold flex items-center gap-2"><Merge size={17} /> Merge {from.label}</h2>
+          <button onClick={onClose} className="text-ink/40"><X size={20} /></button>
+        </div>
+        <p className="text-sm text-ink/50 mb-4">
+          {from.label}'s bill folds into whichever table you pick — both parties stay seated where they are, but pay together at Billing.
+        </p>
+        {mergeable.length === 0 ? (
+          <p className="text-sm text-ink/40">No other occupied tables to merge with right now.</p>
+        ) : (
+          <div className="space-y-2">
+            {mergeable.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => onConfirm(t.id)}
+                className="w-full text-left rounded-xl border border-ink/10 px-3.5 py-2.5 text-sm font-semibold hover:bg-ink/5"
+              >
+                {t.label} <span className="text-ink/40 font-normal">· {t.customerName ?? 'occupied'}</span>
               </button>
             ))}
           </div>
