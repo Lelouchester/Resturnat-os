@@ -10,4 +10,5 @@ export interface KitchenTicket {
   tableLabel: string
   items: OrderItemRow[] // active items only — served/void already dropped
   firedAt: string // earliest still-active item's created_at
+  allServed: boolean // true once every item is served — ticket stays visible but calm until billing clears it
 }

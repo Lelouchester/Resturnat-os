@@ -42,11 +42,15 @@ export function useShiftLedger(shiftId: string | undefined, openedAt: string | u
       const key = (row as any).accounts?.payment_methods?.key
       if (!key) continue
       if (!next[key]) next[key] = { revenue: 0, purchases: 0 }
-      if (row.reason === 'order payment') {
-        next[key].revenue += Number(row.amount)
+      const amount = Number(row.amount)
+      // Bucket by sign, not by exact reason string — money in is revenue
+      // (order payments, dues settled), money out is a purchase, regardless
+      // of which of purchasing's several reason labels wrote it.
+      if (amount >= 0) {
+        next[key].revenue += amount
         if (row.order_id) paidOrderIds.add(row.order_id)
-      } else if (row.reason === 'purchase payment') {
-        next[key].purchases += Math.abs(Number(row.amount))
+      } else {
+        next[key].purchases += Math.abs(amount)
       }
     }
     setByMethod(next)

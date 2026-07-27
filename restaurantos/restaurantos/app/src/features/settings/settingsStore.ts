@@ -20,6 +20,7 @@ export interface RestaurantSettings {
   defaultServiceChargePct: number
   receiptFooter: string
   theme: 'light' | 'dark'
+  brandColor: string
   dueReminderDays: number
 }
 
@@ -44,7 +45,7 @@ async function loadProfile(): Promise<RestaurantSettings> {
     supabase.from('branches').select('name, address, phone, slogan, notes').eq('id', CURRENT_BRANCH_ID).maybeSingle(),
     supabase
       .from('restaurant_settings')
-      .select('open_time, close_time, default_tax_pct, default_service_charge_pct, receipt_footer, theme, due_reminder_days')
+      .select('open_time, close_time, default_tax_pct, default_service_charge_pct, receipt_footer, theme, brand_color, due_reminder_days')
       .eq('branch_id', CURRENT_BRANCH_ID)
       .maybeSingle(),
   ])
@@ -63,6 +64,7 @@ async function loadProfile(): Promise<RestaurantSettings> {
     defaultServiceChargePct: Number(rs?.default_service_charge_pct) || 0,
     receiptFooter: rs?.receipt_footer ?? '',
     theme: (rs?.theme as 'light' | 'dark') ?? 'light',
+    brandColor: rs?.brand_color ?? '#e8862e',
     dueReminderDays: rs?.due_reminder_days ?? 7,
   }
 }
@@ -92,6 +94,7 @@ function schedulePersist(patch: Partial<RestaurantSettings>) {
     if (toSave.defaultServiceChargePct !== undefined) settingsPatch.default_service_charge_pct = toSave.defaultServiceChargePct
     if (toSave.receiptFooter !== undefined) settingsPatch.receipt_footer = toSave.receiptFooter
     if (toSave.theme !== undefined) settingsPatch.theme = toSave.theme
+    if (toSave.brandColor !== undefined) settingsPatch.brand_color = toSave.brandColor
     if (toSave.dueReminderDays !== undefined) settingsPatch.due_reminder_days = toSave.dueReminderDays
 
     if (Object.keys(branchPatch).length > 0) {
@@ -121,6 +124,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   defaultServiceChargePct: 10,
   receiptFooter: '',
   theme: 'light',
+  brandColor: '#e8862e',
   dueReminderDays: 7,
   profileLoading: true,
 

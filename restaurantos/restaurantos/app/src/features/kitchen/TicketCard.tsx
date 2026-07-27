@@ -24,29 +24,35 @@ export function TicketCard({
   onPrint: (ticket: KitchenTicket) => void
 }) {
   const minutes = useElapsedMinutes(ticket.firedAt)
-  const urgent = minutes >= 12
-  const warm = minutes >= 6
+  const urgent = !ticket.allServed && minutes >= 12
+  const warm = !ticket.allServed && minutes >= 6
 
   return (
-    <Card className={`ticket-edge p-4 pt-5 ${urgent ? 'ring-2 ring-status-cleaning' : ''}`}>
+    <Card className={`ticket-edge p-4 pt-5 ${urgent ? 'ring-2 ring-status-cleaning' : ''} ${ticket.allServed ? 'opacity-60' : ''}`}>
       <div className="flex items-center justify-between mb-2.5">
         <div className="font-ticket text-lg font-bold">{ticket.tableLabel}</div>
         <div className="flex items-center gap-2">
           <button onClick={() => onPrint(ticket)} className="text-ink/30 hover:text-ink" title="Print KOT">
             <Printer size={15} />
           </button>
-          <div
-            className={`flex items-center gap-1 font-ticket text-xs font-bold px-2 py-0.5 rounded-full ${
-              urgent
-                ? 'bg-status-cleaning-bg text-status-cleaning'
-                : warm
-                ? 'bg-status-occupied-bg text-status-occupied'
-                : 'bg-status-available-bg text-status-available'
-            }`}
-          >
-            {urgent && <Flame size={11} />}
-            {minutes}m
-          </div>
+          {ticket.allServed ? (
+            <div className="flex items-center gap-1 font-ticket text-xs font-bold px-2 py-0.5 rounded-full bg-ink/5 text-ink/40">
+              Waiting on billing
+            </div>
+          ) : (
+            <div
+              className={`flex items-center gap-1 font-ticket text-xs font-bold px-2 py-0.5 rounded-full ${
+                urgent
+                  ? 'bg-status-cleaning-bg text-status-cleaning'
+                  : warm
+                  ? 'bg-status-occupied-bg text-status-occupied'
+                  : 'bg-status-available-bg text-status-available'
+              }`}
+            >
+              {urgent && <Flame size={11} />}
+              {minutes}m
+            </div>
+          )}
         </div>
       </div>
 

@@ -58,6 +58,7 @@ create table restaurant_settings (
   receipt_footer text default 'Thank you — please visit again',
   table_count integer default 8,
   theme text default 'light', -- 'light' | 'dark'
+  brand_color text default '#e8862e', -- overrides the ember accent app-wide, for white-labeling per cafe
   due_reminder_days integer default 7
 );
 

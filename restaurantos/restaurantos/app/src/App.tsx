@@ -26,10 +26,20 @@ const ReportsPage = lazy(() => import('./features/reports/ReportsPage').then((m)
 
 const queryClient = new QueryClient()
 
+// Darkens a hex color by a fraction (0-1) — used to derive the "-dim" shade
+// of whatever accent color a cafe picks, without needing a second picker.
+function darken(hex: string, amount: number): string {
+  const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+  if (!match) return hex
+  const [r, g, b] = [match[1], match[2], match[3]].map((h) => Math.round(parseInt(h, 16) * (1 - amount)))
+  return `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`
+}
+
 function App() {
   // Swap this for real auth state once Supabase auth / PIN verification is wired up.
   const isAuthenticated = true
   const theme = useSettingsStore((s) => s.theme)
+  const brandColor = useSettingsStore((s) => s.brandColor)
   const initPaymentMethods = useSettingsStore((s) => s.initPaymentMethods)
   const initProfile = useSettingsStore((s) => s.initProfile)
   const initShift = useShiftStore((s) => s.init)
@@ -42,6 +52,14 @@ function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
+
+  // Same idea for the brand accent — every "ember" usage in the app reads
+  // this one CSS variable, so overriding it here re-colors the whole app to
+  // whatever a given cafe picks in Settings, no rebuild needed.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--color-ember', brandColor)
+    document.documentElement.style.setProperty('--color-ember-dim', darken(brandColor, 0.3))
+  }, [brandColor])
 
   // Payment methods and shift status are shared across multiple screens —
   // loaded once here rather than separately on each one (Orders in

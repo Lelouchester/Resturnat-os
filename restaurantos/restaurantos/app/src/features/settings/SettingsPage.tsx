@@ -122,6 +122,22 @@ export function SettingsPage() {
           </button>
         </div>
       </Section>
+
+      <Section title="Brand color" note="The one accent color used throughout the app — match it to this cafe's branding.">
+        <div className="flex items-center gap-3">
+          <input
+            type="color"
+            value={settings.brandColor}
+            onChange={(e) => handleChange({ brandColor: e.target.value })}
+            className="h-11 w-16 rounded-lg border border-ink/10 cursor-pointer bg-transparent"
+          />
+          <input
+            value={settings.brandColor}
+            onChange={(e) => handleChange({ brandColor: e.target.value })}
+            className={`${inputClass} font-ticket`}
+          />
+        </div>
+      </Section>
     </div>
   )
 }

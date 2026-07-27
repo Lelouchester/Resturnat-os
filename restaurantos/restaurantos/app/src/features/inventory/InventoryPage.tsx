@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Plus, AlertTriangle, History, SlidersHorizontal } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { useInventoryStore } from './inventoryStore'
@@ -8,8 +8,14 @@ import type { InventoryItem } from './types'
 export function InventoryPage() {
   const items = useInventoryStore((s) => s.items)
   const movements = useInventoryStore((s) => s.movements)
+  const loading = useInventoryStore((s) => s.loading)
+  const init = useInventoryStore((s) => s.init)
   const addItem = useInventoryStore((s) => s.addItem)
   const adjustStock = useInventoryStore((s) => s.adjustStock)
+
+  useEffect(() => {
+    init()
+  }, [init])
 
   const [adjusting, setAdjusting] = useState<InventoryItem | null>(null)
   const [showHistory, setShowHistory] = useState(false)
@@ -27,6 +33,17 @@ export function InventoryPage() {
     setNewName('')
     setNewBarcode('')
     setAddingItem(false)
+  }
+
+  if (loading) {
+    return (
+      <div className="p-4 md:p-6 max-w-3xl mx-auto">
+        <div className="mb-4">
+          <h1 className="font-ticket text-xl font-bold">Inventory</h1>
+        </div>
+        <div className="h-40 rounded-2xl bg-ink/5 animate-pulse" />
+      </div>
+    )
   }
 
   return (

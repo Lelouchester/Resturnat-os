@@ -35,12 +35,14 @@ export function TableCard({
   onMove,
   onMerge,
   onMarkCleaned,
+  runningTotal,
 }: {
   table: RestaurantTable
   onSelect: (id: string) => void
   onMove?: (id: string) => void
   onMerge?: (id: string) => void
   onMarkCleaned?: (id: string) => void
+  runningTotal?: number
 }) {
   const minutes = useElapsedMinutes(table.seatedAt)
   const timeTone = minutes > 90 ? 'text-status-cleaning' : minutes > 45 ? 'text-status-occupied' : 'text-status-available'
@@ -73,8 +75,8 @@ export function TableCard({
         {table.seatedAt && (
           <div className={`font-ticket font-semibold ${timeTone}`}>{minutes}m</div>
         )}
-        {typeof table.runningTotal === 'number' && (
-          <div className="font-ticket font-semibold">Rs. {table.runningTotal}</div>
+        {typeof runningTotal === 'number' && runningTotal > 0 && (
+          <div className="font-ticket font-semibold">Rs. {runningTotal}</div>
         )}
       </div>
 
