@@ -20,6 +20,7 @@ interface TablesState {
   seatReservation: (tableId: string, customerName: string, guestCount: number) => Promise<void>
   markArrived: (tableId: string) => Promise<void>
   updateGuestInfo: (tableId: string, customerName: string, guestCount?: number) => Promise<void>
+  markCleaned: (tableId: string) => Promise<void>
   addTable: (label: string, seats: number) => Promise<void>
 }
 
@@ -119,6 +120,15 @@ export const useTablesStore = create<TablesState>((set, get) => ({
     if (guestCount !== undefined) payload.guest_count = guestCount
     const { error } = await supabase.from('restaurant_tables').update(payload).eq('id', tableId)
     if (error) console.error('[tablesStore] updateGuestInfo failed', error)
+  },
+
+  markCleaned: async (tableId) => {
+    const { error } = await supabase
+      .from('restaurant_tables')
+      .update({ status: 'available' })
+      .eq('id', tableId)
+      .eq('status', 'needs_cleaning')
+    if (error) console.error('[tablesStore] markCleaned failed', error)
   },
 
   addTable: async (label, seats) => {

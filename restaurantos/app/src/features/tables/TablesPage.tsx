@@ -22,6 +22,7 @@ export function TablesPage() {
   const loading = useTablesStore((s) => s.loading)
   const init = useTablesStore((s) => s.init)
   const addTable = useTablesStore((s) => s.addTable)
+  const markCleaned = useTablesStore((s) => s.markCleaned)
   const initOrders = useOrdersStore((s) => s.init)
   const transferOrderTable = useOrdersStore((s) => s.transferOrderTable)
   const mergeOrders = useOrdersStore((s) => s.mergeOrders)
@@ -115,6 +116,7 @@ export function TablesPage() {
                   onSelect={handleSelectTable}
                   onMove={setTransferringId}
                   onMerge={setMergingId}
+                  onMarkCleaned={markCleaned}
                 />
               ))
             )}

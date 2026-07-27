@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Users, ArrowRightLeft, Merge } from 'lucide-react'
+import { Users, ArrowRightLeft, Merge, SprayCan } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { StatusPill } from '../../shared/ui/StatusPill'
 import type { TableStatus } from '../../shared/ui/StatusPill'
@@ -34,15 +34,18 @@ export function TableCard({
   onSelect,
   onMove,
   onMerge,
+  onMarkCleaned,
 }: {
   table: RestaurantTable
   onSelect: (id: string) => void
   onMove?: (id: string) => void
   onMerge?: (id: string) => void
+  onMarkCleaned?: (id: string) => void
 }) {
   const minutes = useElapsedMinutes(table.seatedAt)
   const timeTone = minutes > 90 ? 'text-status-cleaning' : minutes > 45 ? 'text-status-occupied' : 'text-status-available'
   const showQuickActions = (table.status === 'occupied' || table.status === 'billing') && (onMove || onMerge)
+  const showCleanedAction = table.status === 'needs_cleaning' && onMarkCleaned
 
   return (
     <Card
@@ -99,6 +102,17 @@ export function TableCard({
               <Merge size={12} /> Merge
             </span>
           )}
+        </div>
+      )}
+
+      {showCleanedAction && (
+        <div className="mt-3 pt-2.5 border-t border-ink/5">
+          <button
+            onClick={(e) => { e.stopPropagation(); onMarkCleaned!(table.id) }}
+            className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-status-cleaning-bg text-status-cleaning py-1.5 text-xs font-semibold hover:brightness-95"
+          >
+            <SprayCan size={13} /> Mark cleaned
+          </button>
         </div>
       )}
     </Card>

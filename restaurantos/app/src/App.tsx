@@ -31,6 +31,7 @@ function App() {
   const isAuthenticated = true
   const theme = useSettingsStore((s) => s.theme)
   const initPaymentMethods = useSettingsStore((s) => s.initPaymentMethods)
+  const initProfile = useSettingsStore((s) => s.initProfile)
   const initShift = useShiftStore((s) => s.init)
   const initOrders = useOrdersStore((s) => s.init)
   const initAccounts = useAccountsStore((s) => s.init)
@@ -51,10 +52,11 @@ function App() {
   // resolves balances through them.
   useEffect(() => {
     initPaymentMethods()
+    initProfile()
     initShift()
     initOrders()
     initAccounts()
-  }, [initPaymentMethods, initShift, initOrders, initAccounts])
+  }, [initPaymentMethods, initProfile, initShift, initOrders, initAccounts])
 
   return (
     <QueryClientProvider client={queryClient}>

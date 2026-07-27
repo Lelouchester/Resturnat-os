@@ -12,8 +12,9 @@ import type { LiveOrder } from '../orders/types'
 export function BillingPage() {
   const paymentMethods = useSettingsStore((s) => s.paymentMethods)
   const customers = useCustomersStore((s) => s.customers)
+  const initCustomers = useCustomersStore((s) => s.init)
   const addCustomer = useCustomersStore((s) => s.addCustomer)
-  const recordVisit = useCustomersStore((s) => s.recordVisit)
+  const applyPayment = useCustomersStore((s) => s.applyPayment)
 
   const orders = useOrdersStore((s) => s.orders)
   const ordersLoading = useOrdersStore((s) => s.loading)
@@ -27,7 +28,8 @@ export function BillingPage() {
   useEffect(() => {
     initOrders()
     initTables()
-  }, [initOrders, initTables])
+    initCustomers()
+  }, [initOrders, initTables, initCustomers])
 
   // Anything open or already being closed out, and not already folded into
   // another table's bill — that's the billable list across the top.
@@ -88,18 +90,20 @@ export function BillingPage() {
   const paid = paymentMethods.reduce((s, m) => s + (amounts[m.key] || 0), 0)
   const remaining = total - paid // can go negative (change due)
 
-  // Auto-balance: typing an amount into one method fills whatever's left
-  // into the next empty method automatically, so splitting a bill across
-  // two payment types doesn't need mental math.
+  // Typing just updates that one field — the "fill the rest into the next
+  // empty method" only happens once you leave the field (blur/Tab), not on
+  // every keystroke, so typing "15000" doesn't fight itself along the way.
   function setAmount(key: string, value: number) {
+    setAmounts((cur) => ({ ...cur, [key]: Math.max(0, value) }))
+  }
+  function handleAmountBlur(key: string) {
     setAmounts((cur) => {
-      const next = { ...cur, [key]: Math.max(0, value) }
-      const stillOwed = total - paymentMethods.reduce((s, m) => s + (next[m.key] || 0), 0)
+      const stillOwed = total - paymentMethods.reduce((s, m) => s + (cur[m.key] || 0), 0)
       if (stillOwed > 0) {
-        const autoTarget = paymentMethods.find((m) => m.key !== key && !next[m.key])
-        if (autoTarget) next[autoTarget.key] = stillOwed
+        const autoTarget = paymentMethods.find((m) => m.key !== key && !cur[m.key])
+        if (autoTarget) return { ...cur, [autoTarget.key]: stillOwed }
       }
-      return next
+      return cur
     })
   }
   function payFullWith(key: string) {
@@ -117,8 +121,8 @@ export function BillingPage() {
     beginBilling(tableId)
   }
 
-  function quickAddWalkIn() {
-    const id = addCustomer(customerSearch.trim() || undefined, undefined)
+  async function quickAddWalkIn() {
+    const id = await addCustomer(customerSearch.trim() || undefined, undefined)
     setCustomerId(id)
     setPickerOpen(false)
   }
@@ -147,8 +151,9 @@ export function BillingPage() {
     })
 
     if (customerId) {
-      const itemsSummary = effectiveLines.map((l) => `${l.quantity}x ${l.name}`).join(', ')
-      recordVisit(customerId, paid, itemsSummary, Math.max(0, remaining))
+      // Lifetime spend counts the whole bill, not just what was physically
+      // collected — a due is still money they've spent, just not paid yet.
+      await applyPayment(customerId, total, Math.max(0, remaining))
     }
 
     setToast(remaining > 0 ? 'Marked as due' : remaining < 0 ? 'Payment completed — change due' : 'Payment completed')
@@ -342,6 +347,7 @@ export function BillingPage() {
                     value={amounts[m.key] || ''}
                     placeholder="0"
                     onChange={(e) => setAmount(m.key, Number(e.target.value))}
+                    onBlur={() => handleAmountBlur(m.key)}
                     className="flex-1 min-w-0 text-sm border border-ink/10 rounded-lg px-2.5 py-1.5 outline-none focus:border-ember font-ticket"
                   />
                   <button onClick={() => payFullWith(m.key)} className="shrink-0 text-xs font-semibold text-ember px-1.5">

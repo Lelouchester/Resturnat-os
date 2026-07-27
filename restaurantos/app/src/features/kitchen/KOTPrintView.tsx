@@ -11,7 +11,7 @@ export function KOTPrintView({ ticket }: { ticket: KitchenTicket | null }) {
         <div className="text-xs">{new Date().toLocaleString()}</div>
       </div>
       <div className="border-t border-dashed border-ink/30 my-2" />
-      {ticket.items.map((item) => (
+      {ticket.items.filter((item) => item.status !== 'served').map((item) => (
         <div key={item.id} className="py-1.5">
           <div className="flex justify-between font-semibold">
             <span>{item.quantity}× {item.name}</span>

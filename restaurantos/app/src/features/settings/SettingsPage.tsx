@@ -1,16 +1,32 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { useSettingsStore } from './settingsStore'
 
 export function SettingsPage() {
   const settings = useSettingsStore()
+  const initProfile = useSettingsStore((s) => s.initProfile)
   const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    initProfile()
+  }, [initProfile])
 
   function handleChange(patch: Partial<typeof settings>) {
     settings.update(patch)
     setSaved(true)
     setTimeout(() => setSaved(false), 1200)
+  }
+
+  if (settings.profileLoading) {
+    return (
+      <div className="p-4 md:p-6 max-w-2xl mx-auto pb-16">
+        <div className="mb-4">
+          <h1 className="font-ticket text-xl font-bold">Settings</h1>
+        </div>
+        <div className="h-40 rounded-2xl bg-ink/5 animate-pulse" />
+      </div>
+    )
   }
 
   return (
@@ -23,7 +39,7 @@ export function SettingsPage() {
         {saved && <span className="text-xs font-semibold text-status-available">Saved</span>}
       </div>
 
-      <Section title="Restaurant profile">
+      <Section title="Restaurant profile" note="Shown across receipts and, once multiple locations are set up, used to tell them apart.">
         <Field label="Name">
           <input value={settings.name} onChange={(e) => handleChange({ name: e.target.value })} className={inputClass} />
         </Field>
@@ -32,6 +48,23 @@ export function SettingsPage() {
         </Field>
         <Field label="Phone">
           <input value={settings.phone} onChange={(e) => handleChange({ phone: e.target.value })} className={inputClass} />
+        </Field>
+        <Field label="Slogan">
+          <input
+            value={settings.slogan}
+            onChange={(e) => handleChange({ slogan: e.target.value })}
+            placeholder="e.g. Kathmandu's cosiest corner"
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Notes">
+          <textarea
+            value={settings.notes}
+            onChange={(e) => handleChange({ notes: e.target.value })}
+            placeholder="Anything worth remembering about this location"
+            rows={2}
+            className={`${inputClass} resize-none`}
+          />
         </Field>
       </Section>
 
@@ -60,12 +93,6 @@ export function SettingsPage() {
       <Section title="Receipt">
         <Field label="Footer message">
           <input value={settings.receiptFooter} onChange={(e) => handleChange({ receiptFooter: e.target.value })} className={inputClass} />
-        </Field>
-      </Section>
-
-      <Section title="Table configuration" note="How many table cards show on the Floor screen.">
-        <Field label="Number of tables">
-          <input type="number" value={settings.tableCount} onChange={(e) => handleChange({ tableCount: Number(e.target.value) || 0 })} className={inputClass} />
         </Field>
       </Section>
 

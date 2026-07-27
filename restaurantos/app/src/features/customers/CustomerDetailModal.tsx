@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { X, Star, Phone, Pencil } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
-import { useCustomersStore } from './customersStore'
+import { useCustomersStore, fetchCustomerVisits, type Visit } from './customersStore'
+import { useSettingsStore } from '../settings/settingsStore'
 import { useRepeatOrderStore } from '../orders/repeatOrderStore'
 import { loyaltyTier } from './types'
 import type { Customer } from './types'
@@ -18,14 +19,25 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
   const updateNotes = useCustomersStore((s) => s.updateNotes)
   const updateProfile = useCustomersStore((s) => s.updateProfile)
   const settleDue = useCustomersStore((s) => s.settleDue)
+  const paymentMethods = useSettingsStore((s) => s.paymentMethods)
   const setPendingOrder = useRepeatOrderStore((s) => s.setPending)
   const navigate = useNavigate()
   const [notes, setNotes] = useState(customer.notes ?? '')
   const [settling, setSettling] = useState(false)
   const [amount, setAmount] = useState(String(customer.outstandingDue))
+  const [settleMethod, setSettleMethod] = useState(paymentMethods[0]?.key ?? '')
   const [editingProfile, setEditingProfile] = useState(!customer.name && !customer.phone)
   const [name, setName] = useState(customer.name ?? '')
   const [phone, setPhone] = useState(customer.phone ?? '')
+
+  const [visits, setVisits] = useState<Visit[] | null>(null)
+  const [favoriteItem, setFavoriteItem] = useState<string | undefined>(undefined)
+  useEffect(() => {
+    fetchCustomerVisits(customer.id).then(({ visits, favoriteItem }) => {
+      setVisits(visits)
+      setFavoriteItem(favoriteItem)
+    })
+  }, [customer.id])
 
   // "2x Chicken sekuwa, 1x Masala tea" -> [{name, quantity}] — Orders looks
   // each one up against the live menu and adds whatever still exists.
@@ -39,7 +51,7 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
     navigate('/orders')
   }
 
-  const tier = loyaltyTier(customer.visits.length)
+  const tier = loyaltyTier(customer.visitCount)
 
   function saveProfile() {
     updateProfile(customer.id, { name: name.trim() || undefined, phone: phone.trim() || undefined })
@@ -96,12 +108,12 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
         <div className="grid grid-cols-3 gap-2 mb-4">
           <Stat label="Lifetime" value={`Rs. ${customer.lifetimeSpend}`} />
           <Stat label="Loyalty" value={`${customer.loyaltyPoints} pts`} />
-          <Stat label="Visits" value={String(customer.visits.length)} />
+          <Stat label="Visits" value={String(customer.visitCount)} />
         </div>
 
-        {customer.favoriteItem && (
+        {favoriteItem && (
           <div className="flex items-center gap-1.5 text-sm mb-4 bg-ember/10 text-ember rounded-xl px-3 py-2 font-medium">
-            <Star size={14} className="fill-ember" /> Usually orders {customer.favoriteItem}
+            <Star size={14} className="fill-ember" /> Usually orders {favoriteItem}
           </div>
         )}
 
@@ -124,9 +136,32 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
                   onChange={(e) => setAmount(e.target.value)}
                   className="w-full mb-2 text-sm font-ticket font-bold border border-ink/10 rounded-lg px-2.5 py-2 outline-none focus:border-ember"
                 />
+                {paymentMethods.length > 0 && (
+                  <>
+                    <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Received via</label>
+                    <div className="flex gap-1.5 mb-2 flex-wrap">
+                      {paymentMethods.map((m) => (
+                        <button
+                          key={m.key}
+                          onClick={() => setSettleMethod(m.key)}
+                          className={`text-xs font-semibold rounded-full px-3 py-1.5 ${
+                            settleMethod === m.key ? 'bg-ink text-paper' : 'bg-ink/5 text-ink/60'
+                          }`}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
                 <div className="flex gap-2">
                   <Button variant="secondary" className="flex-1 py-2 text-xs" onClick={() => setSettling(false)}>Cancel</Button>
-                  <Button className="flex-1 py-2 text-xs" onClick={() => { settleDue(customer.id, Number(amount) || 0); setSettling(false) }}>Confirm</Button>
+                  <Button
+                    className="flex-1 py-2 text-xs"
+                    onClick={() => { settleDue(customer.id, Number(amount) || 0, settleMethod || undefined); setSettling(false) }}
+                  >
+                    Confirm
+                  </Button>
                 </div>
               </div>
             )}
@@ -147,11 +182,13 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
 
         <div>
           <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-2">Visit history</div>
-          {customer.visits.length === 0 ? (
+          {visits === null ? (
+            <div className="h-16 rounded-xl bg-ink/5 animate-pulse" />
+          ) : visits.length === 0 ? (
             <p className="text-sm text-ink/40">No visits recorded yet.</p>
           ) : (
             <div className="space-y-2">
-              {customer.visits.map((v, i) => (
+              {visits.map((v, i) => (
                 <div key={i} className="flex justify-between items-start text-sm border-b border-ink/5 pb-2 last:border-0">
                   <div className="min-w-0">
                     <div className="text-xs text-ink/40">{new Date(v.date).toLocaleDateString()}</div>

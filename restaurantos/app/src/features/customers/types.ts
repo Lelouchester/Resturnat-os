@@ -1,9 +1,3 @@
-export interface Visit {
-  date: string // ISO
-  amount: number
-  itemsSummary: string // e.g. "2x Chicken sekuwa, 1x Masala tea"
-}
-
 export type LoyaltyTier = 'New' | 'Regular' | 'Loyal' | 'VIP'
 
 export interface Customer {
@@ -15,8 +9,7 @@ export interface Customer {
   outstandingDue: number
   dueSince?: string // ISO — when they first went into debt (for the Settings reminder threshold), cleared once settled
   notes?: string
-  favoriteItem?: string
-  visits: Visit[]
+  visitCount: number // from a paid-orders count, not a separate stored field
 }
 
 // Loyalty isn't a stored field — it's derived from visit count, so it's

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { PlayCircle, StopCircle, Download, History } from 'lucide-react'
+import { PlayCircle, StopCircle, Download, History, Maximize2, X } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
 import { useShiftStore } from './shiftStore'
 import { useSettingsStore } from '../settings/settingsStore'
-import { useShiftSales, fetchOrderHistory, type OrderHistoryRow } from './useShiftSales'
+import { useShiftLedger, fetchOrderHistory, type OrderHistoryRow } from './useShiftSales'
 import type { MethodBalances } from './types'
 
 function useElapsedTime(since?: string) {
@@ -56,7 +56,7 @@ export function AccountsPage() {
     initShift()
   }, [initShift])
   const paymentMethods = useSettingsStore((s) => s.paymentMethods)
-  const { summary, loading: salesLoading } = useShiftSales(shift?.id)
+  const { byMethod, orderCount, loading: ledgerLoading } = useShiftLedger(shift?.id, shift?.openedAt)
 
   const defaultOpening: MethodBalances = Object.fromEntries(paymentMethods.map((m) => [m.key, m.key === 'cash' ? 5000 : 0]))
   const [opening, setOpening] = useState<MethodBalances>(defaultOpening)
@@ -71,7 +71,8 @@ export function AccountsPage() {
   const elapsed = useElapsedTime(shift?.openedAt)
 
   function expectedFor(key: string) {
-    return (shift?.opening[key] ?? 0) + (summary.byPaymentMethod[key] || 0)
+    const l = byMethod[key] ?? { revenue: 0, purchases: 0 }
+    return (shift?.opening[key] ?? 0) + l.revenue - l.purchases
   }
 
   function handleEndShift() {
@@ -157,31 +158,50 @@ export function AccountsPage() {
           </Card>
 
           <Card className="p-5 mb-4">
-            <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-3">Sales so far — by payment method</div>
-            {salesLoading ? (
-              <div className="h-16 rounded-xl bg-ink/5 animate-pulse" />
+            <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-3">Revenue this shift</div>
+            {ledgerLoading ? (
+              <div className="h-24 rounded-xl bg-ink/5 animate-pulse" />
             ) : (
               <>
-                {paymentMethods.map((m) => (
-                  <Row key={m.key} label={m.label} value={summary.byPaymentMethod[m.key] || 0} />
-                ))}
-                <div className="border-t border-ink/10 mt-2 pt-2 flex justify-between items-baseline">
-                  <span className="text-sm font-semibold">Total</span>
-                  <span className="font-ticket text-lg font-bold">Rs. {summary.totalSales}</span>
-                </div>
-                <div className="text-xs text-ink/40 mt-1">{summary.orderCount} order{summary.orderCount === 1 ? '' : 's'} paid this shift</div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-[11px] text-ink/40">
+                      <th className="pb-2 font-semibold">Method</th>
+                      <th className="pb-2 font-semibold text-right">Revenue</th>
+                      <th className="pb-2 font-semibold text-right">Purchases</th>
+                      <th className="pb-2 font-semibold text-right">End balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paymentMethods.map((m) => {
+                      const l = byMethod[m.key] ?? { revenue: 0, purchases: 0 }
+                      return (
+                        <tr key={m.key} className="border-t border-ink/5">
+                          <td className="py-2 font-medium">{m.label}</td>
+                          <td className="py-2 text-right font-ticket text-status-available">Rs. {l.revenue}</td>
+                          <td className="py-2 text-right font-ticket text-status-cleaning">Rs. {l.purchases}</td>
+                          <td className="py-2 text-right font-ticket font-bold">Rs. {expectedFor(m.key)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-ink/10">
+                      <td className="pt-2 font-semibold">Total</td>
+                      <td className="pt-2 text-right font-ticket font-bold">
+                        Rs. {paymentMethods.reduce((s, m) => s + (byMethod[m.key]?.revenue || 0), 0)}
+                      </td>
+                      <td className="pt-2 text-right font-ticket font-bold">
+                        Rs. {paymentMethods.reduce((s, m) => s + (byMethod[m.key]?.purchases || 0), 0)}
+                      </td>
+                      <td className="pt-2 text-right font-ticket font-bold">
+                        Rs. {paymentMethods.reduce((s, m) => s + expectedFor(m.key), 0)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+                <div className="text-xs text-ink/40 mt-2">{orderCount} order{orderCount === 1 ? '' : 's'} paid this shift</div>
               </>
-            )}
-          </Card>
-
-          <Card className="p-5 mb-4">
-            <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-3">Sales so far — by menu category</div>
-            {salesLoading ? (
-              <div className="h-16 rounded-xl bg-ink/5 animate-pulse" />
-            ) : summary.byCategory.length === 0 ? (
-              <p className="text-xs text-ink/40">No paid orders yet this shift.</p>
-            ) : (
-              summary.byCategory.map((c) => <Row key={c.categoryName} label={c.categoryName} value={c.total} />)
             )}
           </Card>
 
@@ -248,10 +268,11 @@ function todayISO(daysAgo = 0) {
 }
 
 function OrderHistoryCard() {
-  const [from, setFrom] = useState(todayISO(7))
+  const [from, setFrom] = useState(todayISO(0))
   const [to, setTo] = useState(todayISO(0))
   const [rows, setRows] = useState<OrderHistoryRow[] | null>(null)
   const [loading, setLoading] = useState(false)
+  const [expanded, setExpanded] = useState(false)
 
   async function search() {
     setLoading(true)
@@ -260,67 +281,109 @@ function OrderHistoryCard() {
     setLoading(false)
   }
 
+  // Today's orders load automatically — no need to hit Search just to see
+  // what happened today.
+  useEffect(() => {
+    search()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const total = useMemo(() => (rows ?? []).reduce((s, r) => s + r.total, 0), [rows])
 
-  return (
-    <Card className="p-5">
-      <div className="flex items-center gap-1.5 font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-3">
-        <History size={13} /> Order history
+  const listBody = (
+    <>
+      <div className="max-h-72 overflow-y-auto space-y-1.5 mb-2">
+        {(rows ?? []).map((r) => (
+          <div key={r.id} className="flex items-center justify-between text-sm border-b border-ink/5 pb-1.5">
+            <div className="min-w-0">
+              <div className="font-semibold">{r.tableLabel} <span className="text-ink/40 font-normal text-xs">{new Date(r.closedAt).toLocaleString()}</span></div>
+              <div className="text-xs text-ink/40 truncate">{r.itemsSummary}</div>
+            </div>
+            <div className="font-ticket font-semibold shrink-0 ml-2">Rs. {r.total}</div>
+          </div>
+        ))}
       </div>
+      <div className="flex justify-between text-sm pt-1 border-t border-ink/10">
+        <span className="font-semibold">{(rows ?? []).length} orders (latest 50 max)</span>
+        <span className="font-ticket font-bold">Rs. {total}</span>
+      </div>
+    </>
+  )
 
-      <div className="flex items-end gap-2 flex-wrap mb-3">
-        <div>
-          <label className="text-xs font-semibold text-ink/50 mb-1 block">From</label>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="text-sm border border-ink/10 rounded-lg px-2.5 py-1.5 outline-none focus:border-ember" />
+  return (
+    <>
+      <Card className="p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-1.5 font-ticket text-xs font-bold uppercase tracking-wider text-ink/40">
+            <History size={13} /> Order history
+          </div>
+          {rows && rows.length > 0 && (
+            <button onClick={() => setExpanded(true)} className="text-ink/40 hover:text-ink" title="Maximize">
+              <Maximize2 size={15} />
+            </button>
+          )}
         </div>
-        <div>
-          <label className="text-xs font-semibold text-ink/50 mb-1 block">To</label>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="text-sm border border-ink/10 rounded-lg px-2.5 py-1.5 outline-none focus:border-ember" />
+
+        <div className="flex items-end gap-2 flex-wrap mb-3">
+          <div>
+            <label className="text-xs font-semibold text-ink/50 mb-1 block">From</label>
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="text-sm border border-ink/10 rounded-lg px-2.5 py-1.5 outline-none focus:border-ember" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-ink/50 mb-1 block">To</label>
+            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="text-sm border border-ink/10 rounded-lg px-2.5 py-1.5 outline-none focus:border-ember" />
+          </div>
+          <Button variant="secondary" onClick={search} disabled={loading}>{loading ? 'Loading…' : 'Search'}</Button>
+          {rows && rows.length > 0 && (
+            <Button
+              variant="secondary"
+              className="flex items-center gap-1.5"
+              onClick={() => downloadCsv(`orders_${from}_to_${to}.csv`, rows)}
+            >
+              <Download size={14} /> Export CSV
+            </Button>
+          )}
         </div>
-        <Button variant="secondary" onClick={search} disabled={loading}>{loading ? 'Loading…' : 'Search'}</Button>
-        {rows && rows.length > 0 && (
-          <Button
-            variant="secondary"
-            className="flex items-center gap-1.5"
-            onClick={() => downloadCsv(`orders_${from}_to_${to}.csv`, rows)}
-          >
-            <Download size={14} /> Export CSV
-          </Button>
+
+        {rows === null || rows.length === 0 ? (
+          <p className="text-xs text-ink/40">No paid orders in that range.</p>
+        ) : (
+          listBody
         )}
-      </div>
+      </Card>
 
-      {rows === null ? (
-        <p className="text-xs text-ink/40">Pick a date range and tap Search.</p>
-      ) : rows.length === 0 ? (
-        <p className="text-xs text-ink/40">No paid orders in that range.</p>
-      ) : (
-        <>
-          <div className="max-h-72 overflow-y-auto space-y-1.5 mb-2">
-            {rows.map((r) => (
-              <div key={r.id} className="flex items-center justify-between text-sm border-b border-ink/5 pb-1.5">
-                <div className="min-w-0">
-                  <div className="font-semibold">{r.tableLabel} <span className="text-ink/40 font-normal text-xs">{new Date(r.closedAt).toLocaleString()}</span></div>
-                  <div className="text-xs text-ink/40 truncate">{r.itemsSummary}</div>
-                </div>
-                <div className="font-ticket font-semibold shrink-0 ml-2">Rs. {r.total}</div>
+      {expanded && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setExpanded(false)} />
+          <div className="relative bg-surface w-full max-w-lg max-h-[85vh] rounded-3xl p-5 overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between mb-3 shrink-0">
+              <div className="flex items-center gap-1.5 font-ticket text-sm font-bold">
+                <History size={15} /> Order history — {from === to ? from : `${from} to ${to}`}
               </div>
-            ))}
+              <button onClick={() => setExpanded(false)} className="text-ink/40 hover:text-ink"><X size={20} /></button>
+            </div>
+            <div className="overflow-y-auto flex-1">
+              <div className="space-y-1.5 mb-2">
+                {(rows ?? []).map((r) => (
+                  <div key={r.id} className="flex items-center justify-between text-sm border-b border-ink/5 pb-1.5">
+                    <div className="min-w-0">
+                      <div className="font-semibold">{r.tableLabel} <span className="text-ink/40 font-normal text-xs">{new Date(r.closedAt).toLocaleString()}</span></div>
+                      <div className="text-xs text-ink/40 truncate">{r.itemsSummary}</div>
+                    </div>
+                    <div className="font-ticket font-semibold shrink-0 ml-2">Rs. {r.total}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-between text-sm pt-2 border-t border-ink/10 shrink-0">
+              <span className="font-semibold">{(rows ?? []).length} orders</span>
+              <span className="font-ticket font-bold">Rs. {total}</span>
+            </div>
           </div>
-          <div className="flex justify-between text-sm pt-1 border-t border-ink/10">
-            <span className="font-semibold">{rows.length} orders</span>
-            <span className="font-ticket font-bold">Rs. {total}</span>
-          </div>
-        </>
+        </div>
       )}
-    </Card>
+    </>
   )
 }
 
-function Row({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="flex justify-between text-sm py-0.5">
-      <span className="text-ink/60">{label}</span>
-      <span className="font-ticket font-semibold">Rs. {value}</span>
-    </div>
-  )
-}
+

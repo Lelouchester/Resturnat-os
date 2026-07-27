@@ -1,102 +1,191 @@
 import { create } from 'zustand'
+import { supabase } from '../../shared/lib/supabase'
+import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { useAccountsStore } from '../accounts/accountsStore'
 import type { Customer } from './types'
 
-const DEMO_CUSTOMERS: Customer[] = [
-  {
-    id: 'c1',
-    name: 'Rai family',
-    phone: '98XXXXXX01',
-    lifetimeSpend: 18420,
-    loyaltyPoints: 184,
-    outstandingDue: 0,
-    favoriteItem: 'Chicken sekuwa',
-    notes: 'Usually asks for a corner table, comes with 2 kids.',
-    visits: [
-      { date: '2026-07-08T19:20:00', amount: 1840, itemsSummary: '1x Chicken chilli, 2x Chicken sekuwa, 4x Masala tea' },
-      { date: '2026-06-29T20:05:00', amount: 2120, itemsSummary: '2x Mutton curry, 1x Veg thali' },
-      { date: '2026-06-14T18:40:00', amount: 1560, itemsSummary: '3x Chicken momo, 2x Lassi' },
-    ],
-  },
-  {
-    id: 'c2',
-    name: 'Gurung',
-    phone: '98XXXXXX02',
-    lifetimeSpend: 9260,
-    loyaltyPoints: 92,
-    outstandingDue: 3260,
-    dueSince: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
-    favoriteItem: 'Mutton curry',
-    notes: '',
-    visits: [
-      { date: '2026-07-08T20:10:00', amount: 3260, itemsSummary: '2x Mutton curry, 1x Veg thali, 3x Buff momo, 3x Coke' },
-    ],
-  },
-  {
-    id: 'c3',
-    name: 'Karki party',
-    phone: '98XXXXXX03',
-    lifetimeSpend: 4120,
-    loyaltyPoints: 41,
-    outstandingDue: 0,
-    favoriteItem: 'Chicken momo (steamed)',
-    notes: 'Regular Friday evening group, usually 6-7 people.',
-    visits: [
-      { date: '2026-07-08T19:45:00', amount: 640, itemsSummary: '2x Chicken momo, 2x Lassi' },
-      { date: '2026-07-01T19:30:00', amount: 720, itemsSummary: '3x Chicken momo, 1x Lassi' },
-    ],
-  },
-]
-
+/**
+ * Real data now, same shape as the other stores. `visitCount` is loaded as a
+ * single aggregate query (paid orders grouped by customer_id) rather than
+ * fetching every customer's full order history up front — the full visit
+ * list (with items) is fetched on demand per-customer, see
+ * fetchCustomerVisits below, only when someone opens that customer's detail.
+ */
 interface CustomersState {
   customers: Customer[]
-  addCustomer: (name?: string, phone?: string) => string // returns new id
-  updateNotes: (id: string, notes: string) => void
-  updateProfile: (id: string, patch: { name?: string; phone?: string }) => void
-  settleDue: (id: string, amount: number) => void
-  recordVisit: (id: string, amount: number, itemsSummary: string, dueDelta: number) => void
+  loading: boolean
+  initialized: boolean
+  init: () => void
+  addCustomer: (name?: string, phone?: string) => Promise<string>
+  updateNotes: (id: string, notes: string) => Promise<void>
+  updateProfile: (id: string, patch: { name?: string; phone?: string }) => Promise<void>
+  settleDue: (id: string, amount: number, methodKey?: string) => Promise<void>
+  applyPayment: (id: string, billTotal: number, dueDelta: number) => Promise<void>
 }
 
-export const useCustomersStore = create<CustomersState>((set) => ({
-  customers: DEMO_CUSTOMERS,
-  addCustomer: (name, phone) => {
-    const id = `c-${Date.now()}`
-    set((state) => ({
-      customers: [
-        ...state.customers,
-        { id, name, phone, lifetimeSpend: 0, loyaltyPoints: 0, outstandingDue: 0, visits: [] },
-      ],
-    }))
-    return id
+function mapRow(row: any, visitCounts: Map<string, number>): Customer {
+  return {
+    id: row.id,
+    name: row.name ?? undefined,
+    phone: row.phone ?? undefined,
+    lifetimeSpend: Number(row.lifetime_spend) || 0,
+    loyaltyPoints: row.loyalty_points ?? 0,
+    outstandingDue: Number(row.outstanding_due) || 0,
+    dueSince: row.due_since ?? undefined,
+    notes: row.notes ?? undefined,
+    visitCount: visitCounts.get(row.id) ?? 0,
+  }
+}
+
+async function loadCustomers(): Promise<Customer[]> {
+  const [{ data: customers, error: custErr }, { data: paidOrders, error: ordErr }] = await Promise.all([
+    supabase.from('customers').select('*').eq('branch_id', CURRENT_BRANCH_ID),
+    supabase.from('orders').select('customer_id').eq('branch_id', CURRENT_BRANCH_ID).eq('status', 'paid').not('customer_id', 'is', null),
+  ])
+  if (custErr) console.error('[customersStore] failed to load customers', custErr)
+  if (ordErr) console.error('[customersStore] failed to load visit counts', ordErr)
+
+  const visitCounts = new Map<string, number>()
+  for (const o of paidOrders ?? []) {
+    const id = (o as any).customer_id
+    visitCounts.set(id, (visitCounts.get(id) ?? 0) + 1)
+  }
+
+  return (customers ?? []).map((row) => mapRow(row, visitCounts))
+}
+
+export const useCustomersStore = create<CustomersState>((set, get) => ({
+  customers: [],
+  loading: true,
+  initialized: false,
+
+  init: () => {
+    if (get().initialized) return
+    set({ initialized: true })
+
+    loadCustomers().then((customers) => set({ customers, loading: false }))
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') loadCustomers().then((customers) => set({ customers }))
+    })
+
+    supabase
+      .channel(`customers:${CURRENT_BRANCH_ID}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'customers', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` }, () =>
+        loadCustomers().then((customers) => set({ customers }))
+      )
+      // A newly-paid order changes someone's visit count — cheap enough to
+      // just reload the whole list rather than track this incrementally.
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` }, () =>
+        loadCustomers().then((customers) => set({ customers }))
+      )
+      .subscribe()
   },
-  updateNotes: (id, notes) =>
-    set((state) => ({
-      customers: state.customers.map((c) => (c.id === id ? { ...c, notes } : c)),
-    })),
-  updateProfile: (id, patch) =>
-    set((state) => ({
-      customers: state.customers.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-    })),
-  settleDue: (id, amount) =>
-    set((state) => ({
-      customers: state.customers.map((c) => {
-        if (c.id !== id) return c
-        const nextDue = Math.max(0, c.outstandingDue - amount)
-        return { ...c, outstandingDue: nextDue, dueSince: nextDue === 0 ? undefined : c.dueSince }
-      }),
-    })),
-  recordVisit: (id, amount, itemsSummary, dueDelta) =>
-    set((state) => ({
-      customers: state.customers.map((c) =>
-        c.id === id
-          ? {
-              ...c,
-              lifetimeSpend: c.lifetimeSpend + amount,
-              outstandingDue: Math.max(0, c.outstandingDue + dueDelta),
-              dueSince: c.outstandingDue === 0 && dueDelta > 0 ? new Date().toISOString() : c.dueSince,
-              loyaltyPoints: c.loyaltyPoints + Math.round(amount / 100),
-              visits: [{ date: new Date().toISOString(), amount, itemsSummary }, ...c.visits],
-            }
-          : c
-      ),
-    })),
+
+  addCustomer: async (name, phone) => {
+    const { data, error } = await supabase
+      .from('customers')
+      .insert({ branch_id: CURRENT_BRANCH_ID, name: name ?? null, phone: phone ?? null })
+      .select()
+      .single()
+    if (error || !data) {
+      console.error('[customersStore] addCustomer failed', error)
+      throw error
+    }
+    set({ customers: await loadCustomers() })
+    return data.id
+  },
+
+  updateNotes: async (id, notes) => {
+    const { error } = await supabase.from('customers').update({ notes }).eq('id', id)
+    if (error) console.error('[customersStore] updateNotes failed', error)
+  },
+
+  updateProfile: async (id, patch) => {
+    const { error } = await supabase
+      .from('customers')
+      .update({ name: patch.name ?? null, phone: patch.phone ?? null })
+      .eq('id', id)
+    if (error) console.error('[customersStore] updateProfile failed', error)
+  },
+
+  settleDue: async (id, amount, methodKey) => {
+    const cust = get().customers.find((c) => c.id === id)
+    if (!cust || amount <= 0) return
+    const nextDue = Math.max(0, cust.outstandingDue - amount)
+    const { error } = await supabase
+      .from('customers')
+      .update({ outstanding_due: nextDue, due_since: nextDue === 0 ? null : cust.dueSince ?? null })
+      .eq('id', id)
+    if (error) console.error('[customersStore] settleDue failed', error)
+    // A due being settled is real cash coming in — deposit it the same way
+    // Billing does, so it shows up in Accounts too.
+    if (methodKey) await useAccountsStore.getState().deposit(methodKey, amount, { reason: 'due settled' })
+    set({ customers: await loadCustomers() })
+  },
+
+  applyPayment: async (id, billTotal, dueDelta) => {
+    const cust = get().customers.find((c) => c.id === id)
+    if (!cust) return
+    const nextDue = Math.max(0, cust.outstandingDue + dueDelta)
+    const { error } = await supabase
+      .from('customers')
+      .update({
+        lifetime_spend: cust.lifetimeSpend + billTotal,
+        loyalty_points: cust.loyaltyPoints + Math.round(billTotal / 100),
+        outstanding_due: nextDue,
+        due_since: cust.outstandingDue === 0 && dueDelta > 0 ? new Date().toISOString() : cust.dueSince ?? null,
+      })
+      .eq('id', id)
+    if (error) console.error('[customersStore] applyPayment failed', error)
+    set({ customers: await loadCustomers() })
+  },
 }))
+
+export interface Visit {
+  date: string
+  amount: number
+  itemsSummary: string
+}
+
+// Fetched on demand when a customer's detail view opens — their real order
+// history, plus their most-ordered item worked out from it.
+export async function fetchCustomerVisits(customerId: string): Promise<{ visits: Visit[]; favoriteItem?: string }> {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('closed_at, total, order_items ( quantity, custom_name, is_complimentary, status, menu_items ( name ) )')
+    .eq('customer_id', customerId)
+    .eq('status', 'paid')
+    .order('closed_at', { ascending: false })
+    .limit(20)
+
+  if (error) {
+    console.error('[fetchCustomerVisits] query failed', error)
+    return { visits: [] }
+  }
+
+  const itemCounts = new Map<string, number>()
+  const visits: Visit[] = (data ?? []).map((o: any) => {
+    const activeItems = (o.order_items ?? []).filter((i: any) => i.status !== 'void')
+    for (const i of activeItems) {
+      const name = i.custom_name ?? i.menu_items?.name ?? 'Item'
+      itemCounts.set(name, (itemCounts.get(name) ?? 0) + i.quantity)
+    }
+    return {
+      date: o.closed_at,
+      amount: Number(o.total) || 0,
+      itemsSummary: activeItems.map((i: any) => `${i.quantity}x ${i.custom_name ?? i.menu_items?.name ?? 'Item'}`).join(', '),
+    }
+  })
+
+  let favoriteItem: string | undefined
+  let max = 0
+  for (const [name, count] of itemCounts) {
+    if (count > max) {
+      max = count
+      favoriteItem = name
+    }
+  }
+
+  return { visits, favoriteItem }
+}

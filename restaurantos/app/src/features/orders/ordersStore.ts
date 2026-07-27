@@ -165,13 +165,14 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       throw error
     }
 
-    // Only flips the table if it was sitting 'available' — never overwrites
-    // a table someone's already seated some other way.
+    // Flips the table straight to occupied whether it was sitting
+    // 'available' or still marked 'needs_cleaning' — a new party sitting
+    // down clears that status on its own, no separate step required.
     await supabase
       .from('restaurant_tables')
       .update({ status: 'occupied', seated_at: new Date().toISOString() })
       .eq('id', tableId)
-      .eq('status', 'available')
+      .in('status', ['available', 'needs_cleaning'])
 
     set({ orders: await loadOpenOrders() })
     return data.id

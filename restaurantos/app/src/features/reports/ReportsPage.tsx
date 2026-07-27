@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, CartesianGrid,
@@ -16,6 +16,11 @@ export function ReportsPage() {
 
   const inventoryItems = useInventoryStore((s) => s.items)
   const customers = useCustomersStore((s) => s.customers)
+  const initCustomers = useCustomersStore((s) => s.init)
+
+  useEffect(() => {
+    initCustomers()
+  }, [initCustomers])
 
   const lowStockItems = useMemo(() => inventoryItems.filter((i) => i.currentStock <= i.minStock), [inventoryItems])
   const topSpender = useMemo(
@@ -24,7 +29,7 @@ export function ReportsPage() {
   )
   const repeatCustomerPct = useMemo(() => {
     if (customers.length === 0) return 0
-    const repeat = customers.filter((c) => c.visits.length > 1).length
+    const repeat = customers.filter((c) => c.visitCount > 1).length
     return Math.round((repeat / customers.length) * 100)
   }, [customers])
 

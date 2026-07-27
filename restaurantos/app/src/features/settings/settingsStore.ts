@@ -11,18 +11,21 @@ export interface PaymentMethodConfig {
 export interface RestaurantSettings {
   name: string
   address: string
-  phone: string // not in the database yet — see note below, stays local-only for now
+  phone: string
+  slogan: string
+  notes: string
   openTime: string
   closeTime: string
   defaultTaxPct: number
   defaultServiceChargePct: number
   receiptFooter: string
-  tableCount: number
   theme: 'light' | 'dark'
   dueReminderDays: number
 }
 
 interface SettingsState extends RestaurantSettings {
+  profileLoading: boolean
+  initProfile: () => void
   paymentMethods: PaymentMethodConfig[]
   paymentMethodsLoading: boolean
   initPaymentMethods: () => void
@@ -32,24 +35,120 @@ interface SettingsState extends RestaurantSettings {
 }
 
 let paymentMethodsInitialized = false
+let profileInitialized = false
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+let pendingPatch: Partial<RestaurantSettings> = {}
+
+async function loadProfile(): Promise<RestaurantSettings> {
+  const [{ data: branch, error: branchErr }, { data: rs, error: rsErr }] = await Promise.all([
+    supabase.from('branches').select('name, address, phone, slogan, notes').eq('id', CURRENT_BRANCH_ID).maybeSingle(),
+    supabase
+      .from('restaurant_settings')
+      .select('open_time, close_time, default_tax_pct, default_service_charge_pct, receipt_footer, theme, due_reminder_days')
+      .eq('branch_id', CURRENT_BRANCH_ID)
+      .maybeSingle(),
+  ])
+  if (branchErr) console.error('[settingsStore] failed to load branch profile', branchErr)
+  if (rsErr) console.error('[settingsStore] failed to load restaurant_settings', rsErr)
+
+  return {
+    name: branch?.name ?? '',
+    address: branch?.address ?? '',
+    phone: branch?.phone ?? '',
+    slogan: branch?.slogan ?? '',
+    notes: branch?.notes ?? '',
+    openTime: (rs?.open_time as string | undefined)?.slice(0, 5) ?? '10:00',
+    closeTime: (rs?.close_time as string | undefined)?.slice(0, 5) ?? '22:00',
+    defaultTaxPct: Number(rs?.default_tax_pct) || 0,
+    defaultServiceChargePct: Number(rs?.default_service_charge_pct) || 0,
+    receiptFooter: rs?.receipt_footer ?? '',
+    theme: (rs?.theme as 'light' | 'dark') ?? 'light',
+    dueReminderDays: rs?.due_reminder_days ?? 7,
+  }
+}
+
+// Every field lives on one of two tables (branches, or restaurant_settings)
+// — this splits an incoming patch and writes each half to the right place.
+// Debounced so typing a name doesn't fire a network call per keystroke;
+// local state (via `set`) updates instantly regardless.
+function schedulePersist(patch: Partial<RestaurantSettings>) {
+  pendingPatch = { ...pendingPatch, ...patch }
+  if (persistTimer) clearTimeout(persistTimer)
+  persistTimer = setTimeout(async () => {
+    const toSave = pendingPatch
+    pendingPatch = {}
+
+    const branchPatch: Record<string, unknown> = {}
+    if (toSave.name !== undefined) branchPatch.name = toSave.name
+    if (toSave.address !== undefined) branchPatch.address = toSave.address
+    if (toSave.phone !== undefined) branchPatch.phone = toSave.phone
+    if (toSave.slogan !== undefined) branchPatch.slogan = toSave.slogan
+    if (toSave.notes !== undefined) branchPatch.notes = toSave.notes
+
+    const settingsPatch: Record<string, unknown> = {}
+    if (toSave.openTime !== undefined) settingsPatch.open_time = toSave.openTime
+    if (toSave.closeTime !== undefined) settingsPatch.close_time = toSave.closeTime
+    if (toSave.defaultTaxPct !== undefined) settingsPatch.default_tax_pct = toSave.defaultTaxPct
+    if (toSave.defaultServiceChargePct !== undefined) settingsPatch.default_service_charge_pct = toSave.defaultServiceChargePct
+    if (toSave.receiptFooter !== undefined) settingsPatch.receipt_footer = toSave.receiptFooter
+    if (toSave.theme !== undefined) settingsPatch.theme = toSave.theme
+    if (toSave.dueReminderDays !== undefined) settingsPatch.due_reminder_days = toSave.dueReminderDays
+
+    if (Object.keys(branchPatch).length > 0) {
+      const { error } = await supabase.from('branches').update(branchPatch).eq('id', CURRENT_BRANCH_ID)
+      if (error) console.error('[settingsStore] failed to save branch profile', error)
+    }
+    if (Object.keys(settingsPatch).length > 0) {
+      const { error } = await supabase.from('restaurant_settings').update(settingsPatch).eq('branch_id', CURRENT_BRANCH_ID)
+      if (error) console.error('[settingsStore] failed to save restaurant settings', error)
+    }
+  }, 600)
+}
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
-  // Restaurant profile / defaults — not wired to Supabase yet (that's
-  // `branches` + `restaurant_settings`, next in line after the operational
-  // loop). `phone` specifically has no column yet anywhere — local-only
-  // until a small follow-up migration adds it.
-  name: 'Café Kitli',
-  address: 'Thamel, Kathmandu',
-  phone: '01-XXXXXXX',
+  // Placeholder values until initProfile() loads the real row — every field
+  // here is real now, split across `branches` (name/address/phone/slogan/
+  // notes) and `restaurant_settings` (hours/tax/service charge/receipt
+  // footer/theme/due reminder), one row per branch.
+  name: '',
+  address: '',
+  phone: '',
+  slogan: '',
+  notes: '',
   openTime: '10:00',
   closeTime: '22:00',
   defaultTaxPct: 13,
   defaultServiceChargePct: 10,
-  receiptFooter: 'Thank you — please visit again',
-  tableCount: 8,
+  receiptFooter: '',
   theme: 'light',
   dueReminderDays: 7,
-  update: (patch) => set(patch),
+  profileLoading: true,
+
+  initProfile: () => {
+    if (profileInitialized) return
+    profileInitialized = true
+
+    loadProfile().then((profile) => set({ ...profile, profileLoading: false }))
+
+    supabase
+      .channel(`branch-profile:${CURRENT_BRANCH_ID}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'branches', filter: `id=eq.${CURRENT_BRANCH_ID}` }, () =>
+        loadProfile().then((profile) => set(profile))
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'restaurant_settings', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` },
+        () => loadProfile().then((profile) => set(profile))
+      )
+      .subscribe()
+  },
+
+  // Updates local state immediately (so typing feels instant) and persists
+  // to Supabase shortly after, batched — see schedulePersist above.
+  update: (patch) => {
+    set(patch)
+    schedulePersist(patch)
+  },
 
   // Payment methods ARE real now — Billing, Shifts, and Purchasing all read
   // this same list, so adding one here (or removing one) genuinely changes

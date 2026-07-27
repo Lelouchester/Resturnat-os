@@ -51,26 +51,36 @@ export function TicketCard({
       </div>
 
       <ul className="space-y-1">
-        {ticket.items.map((item) => (
-          <li key={item.id}>
-            <button
-              onClick={() => onMarkItem(item.id)}
-              className="w-full flex items-start gap-2.5 text-left py-1.5 rounded-lg hover:bg-ink/5 px-1 -mx-1"
-            >
-              <span className="mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 border-ink/25" />
-              <span className="flex-1 text-sm">
-                <span className="font-ticket font-semibold">{item.quantity}×</span>{' '}
-                <span className="font-medium">{item.name}</span>
-                {item.isComplimentary && (
-                  <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-bold text-ember align-middle">
-                    <Gift size={11} /> COMP
-                  </span>
-                )}
-                {item.note && <div className="text-xs text-ember mt-0.5">📝 {item.note}</div>}
-              </span>
-            </button>
-          </li>
-        ))}
+        {ticket.items.map((item) => {
+          const done = item.status === 'served'
+          return (
+            <li key={item.id}>
+              <button
+                onClick={() => !done && onMarkItem(item.id)}
+                disabled={done}
+                className={`w-full flex items-start gap-2.5 text-left py-1.5 rounded-lg px-1 -mx-1 ${done ? '' : 'hover:bg-ink/5'}`}
+              >
+                <span
+                  className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center ${
+                    done ? 'border-ink/15 bg-ink/10' : 'border-ink/25'
+                  }`}
+                >
+                  {done && <span className="h-1.5 w-1.5 rounded-full bg-ink/30" />}
+                </span>
+                <span className={`flex-1 text-sm ${done ? 'line-through text-ink/35' : ''}`}>
+                  <span className="font-ticket font-semibold">{item.quantity}×</span>{' '}
+                  <span className="font-medium">{item.name}</span>
+                  {item.isComplimentary && (
+                    <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-bold text-ember align-middle">
+                      <Gift size={11} /> COMP
+                    </span>
+                  )}
+                  {item.note && !done && <div className="text-xs text-ember mt-0.5">📝 {item.note}</div>}
+                </span>
+              </button>
+            </li>
+          )
+        })}
       </ul>
 
       <p className="mt-2.5 text-[11px] text-ink/35">Tap an item once it's plated and served.</p>

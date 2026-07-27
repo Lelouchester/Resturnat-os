@@ -1,10 +1,9 @@
-import { useMemo, useState } from 'react'
-import { Search, Plus, Star, Phone, AlertTriangle } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Search, Plus, Phone, AlertTriangle } from 'lucide-react'
 import { useCustomersStore } from './customersStore'
 import { useSettingsStore } from '../settings/settingsStore'
 import { CustomerDetailModal } from './CustomerDetailModal'
 import { loyaltyTier } from './types'
-import type { Customer } from './types'
 
 const TIER_STYLE: Record<string, string> = {
   New: 'bg-ink/5 text-ink/50',
@@ -19,11 +18,17 @@ function daysOverdue(dueSince: string) {
 
 export function CustomersPage() {
   const customers = useCustomersStore((s) => s.customers)
+  const loading = useCustomersStore((s) => s.loading)
+  const init = useCustomersStore((s) => s.init)
   const addCustomer = useCustomersStore((s) => s.addCustomer)
   const dueReminderDays = useSettingsStore((s) => s.dueReminderDays)
 
+  useEffect(() => {
+    init()
+  }, [init])
+
   const [search, setSearch] = useState('')
-  const [selected, setSelected] = useState<Customer | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [newName, setNewName] = useState('')
   const [newPhone, setNewPhone] = useState('')
@@ -39,13 +44,26 @@ export function CustomersPage() {
     return customers.filter((c) => c.name?.toLowerCase().includes(q) || c.phone?.includes(q))
   }, [customers, search])
 
+  const selected = customers.find((c) => c.id === selectedId) ?? null
+
   // Name and phone are both optional — a visit can be logged as "Walk-in"
   // and a manager can fill the details in later once they get to know someone.
-  function handleAdd() {
-    addCustomer(newName.trim() || undefined, newPhone.trim() || undefined)
+  async function handleAdd() {
+    await addCustomer(newName.trim() || undefined, newPhone.trim() || undefined)
     setNewName('')
     setNewPhone('')
     setAdding(false)
+  }
+
+  if (loading) {
+    return (
+      <div className="p-4 md:p-6 max-w-3xl mx-auto">
+        <div className="mb-4">
+          <h1 className="font-ticket text-xl font-bold">Customers</h1>
+        </div>
+        <div className="h-40 rounded-2xl bg-ink/5 animate-pulse" />
+      </div>
+    )
   }
 
   return (
@@ -104,11 +122,11 @@ export function CustomersPage() {
 
       <div className="space-y-2">
         {filtered.map((c) => {
-          const tier = loyaltyTier(c.visits.length)
+          const tier = loyaltyTier(c.visitCount)
           return (
             <button
               key={c.id}
-              onClick={() => setSelected(c)}
+              onClick={() => setSelectedId(c.id)}
               className="w-full text-left flex items-center gap-3 bg-surface border border-ink/5 rounded-2xl p-3.5 hover:border-ink/15 transition-colors"
             >
               <div className="flex-1 min-w-0">
@@ -123,11 +141,6 @@ export function CustomersPage() {
                     </>
                   ) : (
                     <span className="italic">No phone on file</span>
-                  )}
-                  {c.favoriteItem && (
-                    <span className="flex items-center gap-0.5 ml-2 text-ember">
-                      <Star size={11} className="fill-ember" /> {c.favoriteItem}
-                    </span>
                   )}
                 </div>
               </div>
@@ -147,7 +160,7 @@ export function CustomersPage() {
         )}
       </div>
 
-      {selected && <CustomerDetailModal customer={selected} onClose={() => setSelected(null)} />}
+      {selected && <CustomerDetailModal customer={selected} onClose={() => setSelectedId(null)} />}
     </div>
   )
 }
