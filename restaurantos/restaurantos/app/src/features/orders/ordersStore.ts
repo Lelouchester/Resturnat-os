@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID, CURRENT_STAFF_ID } from '../../shared/lib/config'
+import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { useAuthStore } from '../auth/authStore'
 import { useShiftStore } from '../shifts/shiftStore'
 import { useTablesStore } from '../tables/tablesStore'
 import { useAccountsStore } from '../accounts/accountsStore'
@@ -156,7 +157,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     const shiftId = useShiftStore.getState().shift?.id
     const { data, error } = await supabase
       .from('orders')
-      .insert({ branch_id: CURRENT_BRANCH_ID, table_id: tableId, shift_id: shiftId ?? null, waiter_id: CURRENT_STAFF_ID, status: 'open' })
+      .insert({ branch_id: CURRENT_BRANCH_ID, table_id: tableId, shift_id: shiftId ?? null, waiter_id: useAuthStore.getState().staff?.id ?? null, status: 'open' })
       .select()
       .single()
 

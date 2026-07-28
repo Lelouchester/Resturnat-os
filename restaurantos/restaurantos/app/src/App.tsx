@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Suspense, lazy, useEffect } from 'react'
+import { useAuthStore } from './features/auth/authStore'
 import { AppShell } from './shared/ui/AppShell'
 import { useSettingsStore } from './features/settings/settingsStore'
 import { useShiftStore } from './features/shifts/shiftStore'
@@ -36,8 +37,8 @@ function darken(hex: string, amount: number): string {
 }
 
 function App() {
-  // Swap this for real auth state once Supabase auth / PIN verification is wired up.
-  const isAuthenticated = true
+  const authStatus = useAuthStore((s) => s.status)
+  const initAuth = useAuthStore((s) => s.init)
   const theme = useSettingsStore((s) => s.theme)
   const brandColor = useSettingsStore((s) => s.brandColor)
   const initPaymentMethods = useSettingsStore((s) => s.initPaymentMethods)
@@ -45,6 +46,10 @@ function App() {
   const initShift = useShiftStore((s) => s.init)
   const initOrders = useOrdersStore((s) => s.init)
   const initAccounts = useAccountsStore((s) => s.init)
+
+  useEffect(() => {
+    initAuth()
+  }, [initAuth])
 
   // The whole app reads color from CSS variables (--color-ink, --color-paper,
   // --color-surface), so flipping this one attribute is the entire dark mode
@@ -67,19 +72,25 @@ function App() {
   // first screen someone opens). Orders is loaded globally too since
   // Notifications (visible in the header everywhere) reads kitchen tickets
   // derived from it. Accounts is initialized after payment methods since it
-  // resolves balances through them.
+  // resolves balances through them. All of this waits for a real signed-in
+  // staff member now, rather than firing before anyone's identity is known.
   useEffect(() => {
+    if (authStatus !== 'signed_in') return
     initPaymentMethods()
     initProfile()
     initShift()
     initOrders()
     initAccounts()
-  }, [initPaymentMethods, initProfile, initShift, initOrders, initAccounts])
+  }, [authStatus, initPaymentMethods, initProfile, initShift, initOrders, initAccounts])
 
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        {!isAuthenticated ? (
+        {authStatus === 'loading' ? (
+          <div data-theme="dark" className="min-h-screen bg-ink flex items-center justify-center">
+            <div className="font-ticket text-sm tracking-[0.3em] text-ember">RESTAURANTOS</div>
+          </div>
+        ) : authStatus !== 'signed_in' ? (
           <LoginPage />
         ) : (
           <AppShell>
