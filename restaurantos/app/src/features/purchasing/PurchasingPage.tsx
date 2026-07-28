@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Plus, X, PackageCheck, Phone, Receipt } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Plus, X, PackageCheck, Phone, Receipt, Trash2 } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
 import { usePurchasingStore } from './purchasingStore'
@@ -14,26 +14,51 @@ const NEW_ITEM_SENTINEL = '__new__'
 export function PurchasingPage() {
   const suppliers = usePurchasingStore((s) => s.suppliers)
   const purchases = usePurchasingStore((s) => s.purchases)
+  const purchasingLoading = usePurchasingStore((s) => s.loading)
+  const initPurchasing = usePurchasingStore((s) => s.init)
   const addSupplier = usePurchasingStore((s) => s.addSupplier)
+  const removeSupplier = usePurchasingStore((s) => s.removeSupplier)
   const createPurchase = usePurchasingStore((s) => s.createPurchase)
   const markReceived = usePurchasingStore((s) => s.markReceived)
   const recordSupplierPayment = usePurchasingStore((s) => s.recordSupplierPayment)
 
   const inventoryItems = useInventoryStore((s) => s.items)
-  const receiveStock = useInventoryStore((s) => s.receiveStock)
+  const initInventory = useInventoryStore((s) => s.init)
   const addInventoryItem = useInventoryStore((s) => s.addItem)
 
-  const withdraw = useAccountsStore((s) => s.withdraw)
+  const initAccounts = useAccountsStore((s) => s.init)
   const balances = useAccountsStore((s) => s.balances)
   const paymentMethods = useSettingsStore((s) => s.paymentMethods)
+
+  useEffect(() => {
+    initPurchasing()
+    initInventory()
+    initAccounts()
+  }, [initPurchasing, initInventory, initAccounts])
 
   const [addingSupplier, setAddingSupplier] = useState(false)
   const [newSupplierName, setNewSupplierName] = useState('')
   const [creatingPurchase, setCreatingPurchase] = useState(false)
   const [payingSupplier, setPayingSupplier] = useState<string | null>(null)
+  const [removeError, setRemoveError] = useState<string | null>(null)
 
-  function handleReceive(purchaseId: string) {
-    markReceived(purchaseId, (itemId, qty, note) => receiveStock(itemId, qty, note))
+  async function handleRemoveSupplier(id: string) {
+    const result = await removeSupplier(id)
+    if (!result.ok) {
+      setRemoveError(result.error ?? 'Could not remove this supplier.')
+      setTimeout(() => setRemoveError(null), 4000)
+    }
+  }
+
+  if (purchasingLoading) {
+    return (
+      <div className="p-4 md:p-6 max-w-3xl mx-auto">
+        <div className="mb-4">
+          <h1 className="font-ticket text-xl font-bold">Purchasing</h1>
+        </div>
+        <div className="h-40 rounded-2xl bg-ink/5 animate-pulse" />
+      </div>
+    )
   }
 
   return (
@@ -85,13 +110,22 @@ export function PurchasingPage() {
         </Card>
       )}
 
+      {removeError && (
+        <div className="mb-3 text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2">{removeError}</div>
+      )}
+
       <div className="space-y-2 mb-6">
         {suppliers.map((s) => (
           <Card key={s.id} className="p-4">
             <div className="flex items-center justify-between mb-1">
               <div className="font-semibold text-sm">{s.name}</div>
-              <div className={`font-ticket text-sm font-bold ${s.outstandingBalance > 0 ? 'text-status-cleaning' : 'text-status-available'}`}>
-                {s.outstandingBalance > 0 ? `Rs. ${s.outstandingBalance} due` : 'Settled'}
+              <div className="flex items-center gap-2">
+                <div className={`font-ticket text-sm font-bold ${s.outstandingBalance > 0 ? 'text-status-cleaning' : 'text-status-available'}`}>
+                  {s.outstandingBalance > 0 ? `Rs. ${s.outstandingBalance} due` : 'Settled'}
+                </div>
+                <button onClick={() => handleRemoveSupplier(s.id)} className="text-ink/25 hover:text-status-cleaning" title="Remove supplier">
+                  <Trash2 size={14} />
+                </button>
               </div>
             </div>
             {s.phone && (
@@ -120,7 +154,8 @@ export function PurchasingPage() {
         {[...purchases].reverse().map((p) => {
           const supplier = suppliers.find((s) => s.id === p.supplierId)
           const total = p.lines.reduce((sum, l) => sum + l.quantity * l.unitCost, 0)
-          const paid = Object.values(p.paidAmounts).reduce((s, a) => s + a, 0)
+          const paidEntries = Object.entries(p.paidAmounts).filter(([, amt]) => amt > 0)
+          const paid = paidEntries.reduce((s, [, a]) => s + a, 0)
           return (
             <Card key={p.id} className="p-4">
               <div className="flex items-center justify-between mb-1.5">
@@ -133,6 +168,18 @@ export function PurchasingPage() {
               <div className="text-xs text-ink/50 mb-2">
                 {p.lines.map((l) => `${l.quantity}× ${l.description}`).join(', ')}
               </div>
+              {paidEntries.length > 0 && (
+                <div className="flex gap-2 flex-wrap mb-2">
+                  {paidEntries.map(([key, amt]) => {
+                    const label = paymentMethods.find((m) => m.key === key)?.label ?? key
+                    return (
+                      <span key={key} className="text-[11px] font-semibold bg-ink/[0.04] rounded-full px-2 py-0.5">
+                        {label}: Rs. {amt}
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs">
                   <span className={p.status === 'received' ? 'text-status-available font-semibold' : 'text-status-occupied font-semibold'}>
@@ -141,7 +188,7 @@ export function PurchasingPage() {
                   {paid < total && <span className="text-status-cleaning font-semibold">Rs. {total - paid} unpaid</span>}
                 </div>
                 {p.status !== 'received' && (
-                  <button onClick={() => handleReceive(p.id)} className="flex items-center gap-1 text-ember font-semibold text-xs">
+                  <button onClick={() => markReceived(p.id)} className="flex items-center gap-1 text-ember font-semibold text-xs">
                     <PackageCheck size={13} /> Mark received
                   </button>
                 )}
@@ -158,12 +205,7 @@ export function PurchasingPage() {
           inventoryItems={inventoryItems}
           paymentMethods={paymentMethods}
           addInventoryItem={addInventoryItem}
-          onSubmit={(input) =>
-            createPurchase(input, {
-              onWithdraw: withdraw,
-              onReceiveStock: (itemId, qty, note) => receiveStock(itemId, qty, note),
-            })
-          }
+          onSubmit={(input) => createPurchase(input)}
         />
       )}
 
@@ -172,7 +214,7 @@ export function PurchasingPage() {
           supplier={suppliers.find((s) => s.id === payingSupplier)!}
           paymentMethods={paymentMethods}
           onClose={() => setPayingSupplier(null)}
-          onSubmit={(method, amount) => { recordSupplierPayment(payingSupplier, method, amount, withdraw); setPayingSupplier(null) }}
+          onSubmit={(method, amount) => { recordSupplierPayment(payingSupplier, method, amount); setPayingSupplier(null) }}
         />
       )}
     </div>
@@ -192,7 +234,7 @@ function NewPurchaseModal({
   suppliers: { id: string; name: string }[]
   inventoryItems: { id: string; name: string }[]
   paymentMethods: { key: string; label: string }[]
-  addInventoryItem: (name: string, unit: string, minStock: number) => string
+  addInventoryItem: (name: string, unit: string, minStock: number) => Promise<string>
 }) {
   const [supplierId, setSupplierId] = useState<string>('')
   const [category, setCategory] = useState<PurchaseCategory>('ingredients')
@@ -226,9 +268,9 @@ function NewPurchaseModal({
     next[key] = total
     setAmounts(next)
   }
-  function confirmNewItem() {
+  async function confirmNewItem() {
     if (!newItemDraft || !newItemDraft.name.trim()) return
-    const id = addInventoryItem(newItemDraft.name.trim(), newItemDraft.unit, 10)
+    const id = await addInventoryItem(newItemDraft.name.trim(), newItemDraft.unit, 10)
     updateLine(newItemDraft.lineId, { inventoryItemId: id, description: newItemDraft.name.trim() })
     setNewItemDraft(null)
   }

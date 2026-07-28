@@ -9,5 +9,4 @@ export interface RestaurantTable {
   guestCount?: number
   waiterName?: string
   seatedAt?: string // ISO timestamp
-  runningTotal?: number
 }

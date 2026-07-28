@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Suspense, lazy, useEffect } from 'react'
+import { useAuthStore } from './features/auth/authStore'
 import { AppShell } from './shared/ui/AppShell'
 import { useSettingsStore } from './features/settings/settingsStore'
 import { useShiftStore } from './features/shifts/shiftStore'
@@ -26,15 +27,29 @@ const ReportsPage = lazy(() => import('./features/reports/ReportsPage').then((m)
 
 const queryClient = new QueryClient()
 
+// Darkens a hex color by a fraction (0-1) — used to derive the "-dim" shade
+// of whatever accent color a cafe picks, without needing a second picker.
+function darken(hex: string, amount: number): string {
+  const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+  if (!match) return hex
+  const [r, g, b] = [match[1], match[2], match[3]].map((h) => Math.round(parseInt(h, 16) * (1 - amount)))
+  return `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`
+}
+
 function App() {
-  // Swap this for real auth state once Supabase auth / PIN verification is wired up.
-  const isAuthenticated = true
+  const authStatus = useAuthStore((s) => s.status)
+  const initAuth = useAuthStore((s) => s.init)
   const theme = useSettingsStore((s) => s.theme)
+  const brandColor = useSettingsStore((s) => s.brandColor)
   const initPaymentMethods = useSettingsStore((s) => s.initPaymentMethods)
   const initProfile = useSettingsStore((s) => s.initProfile)
   const initShift = useShiftStore((s) => s.init)
   const initOrders = useOrdersStore((s) => s.init)
   const initAccounts = useAccountsStore((s) => s.init)
+
+  useEffect(() => {
+    initAuth()
+  }, [initAuth])
 
   // The whole app reads color from CSS variables (--color-ink, --color-paper,
   // --color-surface), so flipping this one attribute is the entire dark mode
@@ -43,25 +58,39 @@ function App() {
     document.documentElement.dataset.theme = theme
   }, [theme])
 
+  // Same idea for the brand accent — every "ember" usage in the app reads
+  // this one CSS variable, so overriding it here re-colors the whole app to
+  // whatever a given cafe picks in Settings, no rebuild needed.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--color-ember', brandColor)
+    document.documentElement.style.setProperty('--color-ember-dim', darken(brandColor, 0.3))
+  }, [brandColor])
+
   // Payment methods and shift status are shared across multiple screens —
   // loaded once here rather than separately on each one (Orders in
   // particular needs to know if a shift is open even if it's the very
   // first screen someone opens). Orders is loaded globally too since
   // Notifications (visible in the header everywhere) reads kitchen tickets
   // derived from it. Accounts is initialized after payment methods since it
-  // resolves balances through them.
+  // resolves balances through them. All of this waits for a real signed-in
+  // staff member now, rather than firing before anyone's identity is known.
   useEffect(() => {
+    if (authStatus !== 'signed_in') return
     initPaymentMethods()
     initProfile()
     initShift()
     initOrders()
     initAccounts()
-  }, [initPaymentMethods, initProfile, initShift, initOrders, initAccounts])
+  }, [authStatus, initPaymentMethods, initProfile, initShift, initOrders, initAccounts])
 
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        {!isAuthenticated ? (
+        {authStatus === 'loading' ? (
+          <div data-theme="dark" className="min-h-screen bg-ink flex items-center justify-center">
+            <div className="font-ticket text-sm tracking-[0.3em] text-ember">RESTAURANTOS</div>
+          </div>
+        ) : authStatus !== 'signed_in' ? (
           <LoginPage />
         ) : (
           <AppShell>

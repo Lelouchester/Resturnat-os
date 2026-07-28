@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID, CURRENT_STAFF_ID } from '../../shared/lib/config'
+import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { useAuthStore } from '../auth/authStore'
 import { useSettingsStore } from '../settings/settingsStore'
 import type { ActiveShift, MethodBalances } from './types'
 
@@ -103,7 +104,7 @@ export const useShiftStore = create<ShiftState>((set, get) => ({
   startShift: async (opening) => {
     const { data: newShift, error: shiftError } = await supabase
       .from('shifts')
-      .insert({ branch_id: CURRENT_BRANCH_ID, opened_by: CURRENT_STAFF_ID, status: 'open' })
+      .insert({ branch_id: CURRENT_BRANCH_ID, opened_by: useAuthStore.getState().staff?.id ?? null, status: 'open' })
       .select()
       .single()
 
@@ -145,7 +146,7 @@ export const useShiftStore = create<ShiftState>((set, get) => ({
 
     const { error: closeError } = await supabase
       .from('shifts')
-      .update({ status: 'closed', closed_at: new Date().toISOString(), closed_by: CURRENT_STAFF_ID })
+      .update({ status: 'closed', closed_at: new Date().toISOString(), closed_by: useAuthStore.getState().staff?.id ?? null })
       .eq('id', currentShift.id)
     if (closeError) console.error('[shiftStore] endShift failed', closeError)
 

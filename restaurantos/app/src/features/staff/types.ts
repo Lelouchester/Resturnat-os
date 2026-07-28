@@ -40,9 +40,11 @@ function only(keys: FeatureKey[]): Permissions {
 export interface StaffMember {
   id: string
   name: string
+  email?: string // matched against their Google account on first sign-in
   role: StaffRole
-  pin: string // 4-digit — demo only; real PINs are hashed server-side, never shown after creation
+  pin: string // legacy demo field, unused now — real access is via Google sign-in
   isActive: boolean
+  hasSignedIn: boolean // false until they've completed their first Google sign-in
   salesGenerated: number
   shiftsWorked: number
   avgPrepMinutes?: number // only meaningful for kitchen role

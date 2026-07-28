@@ -23,9 +23,19 @@ export function TablesPage() {
   const init = useTablesStore((s) => s.init)
   const addTable = useTablesStore((s) => s.addTable)
   const markCleaned = useTablesStore((s) => s.markCleaned)
+  const orders = useOrdersStore((s) => s.orders)
   const initOrders = useOrdersStore((s) => s.init)
   const transferOrderTable = useOrdersStore((s) => s.transferOrderTable)
   const mergeOrders = useOrdersStore((s) => s.mergeOrders)
+
+  const totalsByTable = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const o of orders) {
+      const sum = o.items.filter((i) => i.status !== 'void').reduce((s, i) => s + (i.isComplimentary ? 0 : i.unitPrice * i.quantity), 0)
+      map.set(o.tableId, (map.get(o.tableId) ?? 0) + sum)
+    }
+    return map
+  }, [orders])
 
   useEffect(() => {
     init()
@@ -117,6 +127,7 @@ export function TablesPage() {
                   onMove={setTransferringId}
                   onMerge={setMergingId}
                   onMarkCleaned={markCleaned}
+                  runningTotal={totalsByTable.get(t.id)}
                 />
               ))
             )}

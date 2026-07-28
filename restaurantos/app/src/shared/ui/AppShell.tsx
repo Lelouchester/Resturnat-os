@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { LayoutGrid, ClipboardList, ChefHat, Receipt, Clock, BookOpen, Boxes, Truck, Users, UserCog, BarChart3, Settings, MoreHorizontal, X, Keyboard } from 'lucide-react'
+import { LayoutGrid, ClipboardList, ChefHat, Receipt, Clock, BookOpen, Boxes, Truck, Users, UserCog, BarChart3, Settings, MoreHorizontal, X, Keyboard, LogOut } from 'lucide-react'
 import { NotificationBell } from './NotificationBell'
 import { ShortcutsHelpModal } from './ShortcutsHelpModal'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
+import { useAuthStore } from '../../features/auth/authStore'
 
 const NAV = [
   { to: '/tables', label: 'Floor', icon: LayoutGrid },
@@ -62,6 +63,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </NavLink>
           ))}
         </nav>
+        <AccountFooter />
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
@@ -137,6 +139,24 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       {shortcutsOpen && <ShortcutsHelpModal onClose={() => setShortcutsOpen(false)} />}
+    </div>
+  )
+}
+
+function AccountFooter() {
+  const staff = useAuthStore((s) => s.staff)
+  const signOut = useAuthStore((s) => s.signOut)
+  if (!staff) return null
+
+  return (
+    <div className="px-3 py-3 border-t border-ink/5 flex items-center justify-between">
+      <div className="min-w-0">
+        <div className="text-sm font-semibold truncate">{staff.name}</div>
+        <div className="text-xs text-ink/40 capitalize">{staff.role}</div>
+      </div>
+      <button onClick={signOut} className="shrink-0 rounded-full p-2 text-ink/40 hover:bg-ink/5 hover:text-ink" title="Sign out">
+        <LogOut size={16} />
+      </button>
     </div>
   )
 }

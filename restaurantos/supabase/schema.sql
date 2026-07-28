@@ -58,6 +58,7 @@ create table restaurant_settings (
   receipt_footer text default 'Thank you — please visit again',
   table_count integer default 8,
   theme text default 'light', -- 'light' | 'dark'
+  brand_color text default '#e8862e', -- overrides the ember accent app-wide, for white-labeling per cafe
   due_reminder_days integer default 7
 );
 
@@ -106,7 +107,8 @@ create table ledger_entries (
 create table staff (
   id uuid primary key default uuid_generate_v4(),
   branch_id uuid references branches(id) on delete cascade,
-  auth_user_id uuid references auth.users(id), -- null for PIN-only staff
+  auth_user_id uuid references auth.users(id), -- set once this person's Google account first signs in
+  email text, -- management adds this when creating the staff record; matched against their Google account on first sign-in
   name text not null,
   role staff_role not null default 'waiter',
   pin_hash text, -- bcrypt hash, verified only inside an Edge Function
@@ -399,6 +401,29 @@ create table dismissed_notifications (
   dismissed_at timestamptz default now(),
   primary key (staff_id, notification_id)
 );
+
+-- ----------------------------------------------------------------------------
+-- Google sign-in linking. Management creates a staff row with someone's name
+-- + email before they've ever logged in (auth_user_id is null at that
+-- point). The first time that person signs in with the matching Google
+-- account, the app calls this function, which claims that staff row for
+-- their now-known auth.uid(). It only ever touches a row matching the
+-- CALLER's own verified email and only if unclaimed — one person can't use
+-- this to hijack another's staff row.
+-- ----------------------------------------------------------------------------
+create or replace function link_staff_account() returns void
+language plpgsql security definer as $$
+begin
+  update staff
+  set auth_user_id = auth.uid()
+  where auth_user_id is null
+    and email is not null
+    and lower(email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+    and auth.uid() is not null;
+end;
+$$;
+
+grant execute on function link_staff_account() to authenticated;
 
 -- ============================================================================
 -- Row Level Security — enable + starter policies

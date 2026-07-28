@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID, CURRENT_STAFF_ID } from '../../shared/lib/config'
+import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { useAuthStore } from '../auth/authStore'
 import { useShiftStore } from '../shifts/shiftStore'
 import { useTablesStore } from '../tables/tablesStore'
 import { useAccountsStore } from '../accounts/accountsStore'
@@ -156,7 +157,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     const shiftId = useShiftStore.getState().shift?.id
     const { data, error } = await supabase
       .from('orders')
-      .insert({ branch_id: CURRENT_BRANCH_ID, table_id: tableId, shift_id: shiftId ?? null, waiter_id: CURRENT_STAFF_ID, status: 'open' })
+      .insert({ branch_id: CURRENT_BRANCH_ID, table_id: tableId, shift_id: shiftId ?? null, waiter_id: useAuthStore.getState().staff?.id ?? null, status: 'open' })
       .select()
       .single()
 
@@ -276,7 +277,18 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     const intoOrder = get().getOrderForTable(intoTableId)
     if (!fromOrder || !intoOrder) return
 
-    const { error } = await supabase.from('orders').update({ merged_into_order_id: intoOrder.id }).eq('id', fromOrder.id)
+    // Merging into a table that's itself already merged elsewhere, or
+    // merging a table that already has others merged into it, would build a
+    // hidden A→B→C chain — Billing only looks one level deep, so anything
+    // past the first link would silently vanish from the bill. Flatten
+    // everything onto one root instead.
+    const root = intoOrder.mergedIntoOrderId
+      ? get().orders.find((o) => o.id === intoOrder.mergedIntoOrderId) ?? intoOrder
+      : intoOrder
+    const existingChildren = get().orders.filter((o) => o.mergedIntoOrderId === fromOrder.id).map((o) => o.id)
+    const idsToRelink = [fromOrder.id, ...existingChildren]
+
+    const { error } = await supabase.from('orders').update({ merged_into_order_id: root.id }).in('id', idsToRelink)
     if (error) {
       console.error('[ordersStore] mergeOrders failed', error)
       return

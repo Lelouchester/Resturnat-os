@@ -375,7 +375,7 @@ export function BillingPage() {
           </div>
           <Button
             className="mt-2"
-            disabled={paid === 0}
+            disabled={paid === 0 && total > 0}
             onClick={handleCompletePayment}
           >
             {remaining > 0 ? `Mark Rs. ${remaining} as due & close` : 'Complete payment'}

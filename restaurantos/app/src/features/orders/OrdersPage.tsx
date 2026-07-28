@@ -133,20 +133,25 @@ export function OrdersPage() {
         {/* Table selector */}
         <div className="px-4 md:px-6 pt-4 md:pt-6">
           <div className="flex gap-2 overflow-x-auto pb-3">
-            {openTables.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => setActiveTable(t.id)}
-                className={`shrink-0 rounded-xl px-3.5 py-2 text-left border transition-colors ${
-                  activeTable === t.id ? 'bg-ink text-paper border-ink' : 'bg-surface text-ink border-ink/10'
-                }`}
-              >
-                <div className="font-ticket text-sm font-bold leading-none">{t.label}</div>
-                <div className={`text-[11px] mt-0.5 ${activeTable === t.id ? 'text-paper/60' : 'text-ink/40'}`}>
-                  {t.customerName ?? (t.status === 'available' ? 'New order' : t.status)}
-                </div>
-              </button>
-            ))}
+            {openTables.map((t) => {
+              const tableOrder = orders.find((o) => o.tableId === t.id && (o.status === 'open' || o.status === 'billing'))
+              const tableTotal = tableOrder?.items.filter((i) => i.status !== 'void').reduce((s, i) => s + (i.isComplimentary ? 0 : i.unitPrice * i.quantity), 0)
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setActiveTable(t.id)}
+                  className={`shrink-0 rounded-xl px-3.5 py-2 text-left border transition-colors ${
+                    activeTable === t.id ? 'bg-ink text-paper border-ink' : 'bg-surface text-ink border-ink/10'
+                  }`}
+                >
+                  <div className="font-ticket text-sm font-bold leading-none">{t.label}</div>
+                  <div className={`text-[11px] mt-0.5 ${activeTable === t.id ? 'text-paper/60' : 'text-ink/40'}`}>
+                    {t.customerName ?? (t.status === 'available' ? 'New order' : t.status)}
+                    {!!tableTotal && ` · Rs. ${tableTotal}`}
+                  </div>
+                </button>
+              )
+            })}
           </div>
         </div>
 

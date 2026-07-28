@@ -1,43 +1,112 @@
 import { create } from 'zustand'
+import { supabase } from '../../shared/lib/supabase'
+import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
 import type { StaffMember, StaffRole, FeatureKey } from './types'
-import { DEFAULT_PERMISSIONS } from './types'
+import { DEFAULT_PERMISSIONS, FEATURES } from './types'
 
-const DEMO_STAFF: StaffMember[] = [
-  { id: 's1', name: 'Anjali', role: 'manager', pin: '1234', isActive: true, salesGenerated: 42800, shiftsWorked: 18, permissions: DEFAULT_PERMISSIONS.manager },
-  { id: 's2', name: 'Bikash', role: 'waiter', pin: '2345', isActive: true, salesGenerated: 31200, shiftsWorked: 22, permissions: DEFAULT_PERMISSIONS.waiter },
-  { id: 's3', name: 'Sarita', role: 'cashier', pin: '3456', isActive: true, salesGenerated: 0, shiftsWorked: 20, permissions: DEFAULT_PERMISSIONS.cashier },
-  { id: 's4', name: 'Prakash', role: 'kitchen', pin: '4567', isActive: true, salesGenerated: 0, shiftsWorked: 19, avgPrepMinutes: 11, permissions: DEFAULT_PERMISSIONS.kitchen },
-]
-
+/**
+ * Real data now. A staff member added here has no login yet — auth_user_id
+ * stays null until the person actually signs in with the matching Google
+ * account for the first time (see authStore.link_staff_account). Until
+ * then they simply can't get past the login screen, which is the point:
+ * management pre-approves who's allowed in by adding them here first.
+ */
 interface StaffState {
   staff: StaffMember[]
-  addStaff: (name: string, role: StaffRole, pin: string) => void
-  updateRole: (id: string, role: StaffRole) => void
-  toggleActive: (id: string) => void
-  setPermission: (id: string, feature: FeatureKey, allowed: boolean) => void
+  loading: boolean
+  initialized: boolean
+  init: () => void
+  addStaff: (name: string, email: string, role: StaffRole) => Promise<void>
+  updateRole: (id: string, role: StaffRole) => Promise<void>
+  toggleActive: (id: string) => Promise<void>
+  setPermission: (id: string, feature: FeatureKey, allowed: boolean) => Promise<void>
 }
 
-export const useStaffStore = create<StaffState>((set) => ({
-  staff: DEMO_STAFF,
-  addStaff: (name, role, pin) =>
-    set((state) => ({
-      staff: [
-        ...state.staff,
-        { id: `s-${Date.now()}`, name, role, pin, isActive: true, salesGenerated: 0, shiftsWorked: 0, permissions: DEFAULT_PERMISSIONS[role] },
-      ],
-    })),
-  // Changing role does NOT silently rewrite someone's custom permissions —
-  // only applies fresh defaults, and only if they haven't been touched from
-  // the previous role's defaults, so a manager who hand-picked access for a
-  // waiter doesn't lose that the moment the role dropdown gets bumped.
-  updateRole: (id, role) =>
-    set((state) => ({
-      staff: state.staff.map((s) => (s.id === id ? { ...s, role, permissions: s.permissions } : s)),
-    })),
-  toggleActive: (id) =>
-    set((state) => ({ staff: state.staff.map((s) => (s.id === id ? { ...s, isActive: !s.isActive } : s)) })),
-  setPermission: (id, feature, allowed) =>
-    set((state) => ({
-      staff: state.staff.map((s) => (s.id === id ? { ...s, permissions: { ...s.permissions, [feature]: allowed } } : s)),
-    })),
+function mapStaffRow(row: any): StaffMember {
+  const role = row.role as StaffRole
+  const permissions = { ...DEFAULT_PERMISSIONS[role] }
+  for (const p of row.permissions ?? []) {
+    if (p.feature_key in permissions) permissions[p.feature_key as FeatureKey] = p.allowed
+  }
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email ?? undefined,
+    role,
+    pin: '',
+    isActive: row.is_active,
+    hasSignedIn: row.auth_user_id != null,
+    salesGenerated: Number(row.sales_generated) || 0,
+    shiftsWorked: row.shifts_worked ?? 0,
+    avgPrepMinutes: row.avg_prep_minutes ? Number(row.avg_prep_minutes) : undefined,
+    permissions,
+  }
+}
+
+async function loadStaff(): Promise<StaffMember[]> {
+  const { data, error } = await supabase
+    .from('staff')
+    .select('*, permissions ( feature_key, allowed )')
+    .eq('branch_id', CURRENT_BRANCH_ID)
+    .order('created_at')
+  if (error) {
+    console.error('[staffStore] failed to load staff', error)
+    return []
+  }
+  return (data ?? []).map(mapStaffRow)
+}
+
+export const useStaffStore = create<StaffState>((set, get) => ({
+  staff: [],
+  loading: true,
+  initialized: false,
+
+  init: () => {
+    if (get().initialized) return
+    set({ initialized: true })
+
+    loadStaff().then((staff) => set({ staff, loading: false }))
+
+    supabase
+      .channel(`staff:${CURRENT_BRANCH_ID}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'staff', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` }, () =>
+        loadStaff().then((staff) => set({ staff }))
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'permissions' }, () => loadStaff().then((staff) => set({ staff })))
+      .subscribe()
+  },
+
+  addStaff: async (name, email, role) => {
+    const { error } = await supabase
+      .from('staff')
+      .insert({ branch_id: CURRENT_BRANCH_ID, name, email: email.trim().toLowerCase(), role, is_active: true })
+    if (error) console.error('[staffStore] addStaff failed', error)
+    set({ staff: await loadStaff() })
+  },
+
+  // Role changes don't touch permissions — someone's hand-picked access for
+  // this person shouldn't reset just because their role label changed.
+  updateRole: async (id, role) => {
+    const { error } = await supabase.from('staff').update({ role }).eq('id', id)
+    if (error) console.error('[staffStore] updateRole failed', error)
+    set({ staff: await loadStaff() })
+  },
+
+  toggleActive: async (id) => {
+    const current = get().staff.find((s) => s.id === id)
+    if (!current) return
+    const { error } = await supabase.from('staff').update({ is_active: !current.isActive }).eq('id', id)
+    if (error) console.error('[staffStore] toggleActive failed', error)
+    set({ staff: await loadStaff() })
+  },
+
+  setPermission: async (id, feature, allowed) => {
+    const { error } = await supabase
+      .from('permissions')
+      .upsert({ staff_id: id, feature_key: feature, allowed }, { onConflict: 'staff_id,feature_key' })
+    if (error) console.error('[staffStore] setPermission failed', error)
+    set({ staff: await loadStaff() })
+  },
 }))
+
+export { FEATURES }
