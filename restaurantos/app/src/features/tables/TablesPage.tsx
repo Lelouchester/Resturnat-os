@@ -289,12 +289,16 @@ function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label:
 
 function ReservationsView({ tables }: { tables: ReturnType<typeof useTablesStore.getState>['tables'] }) {
   const reservations = useReservationsStore((s) => s.reservations)
+  const reservationsLoading = useReservationsStore((s) => s.loading)
+  const initReservations = useReservationsStore((s) => s.init)
   const addReservation = useReservationsStore((s) => s.addReservation)
   const assignTable = useReservationsStore((s) => s.assignTable)
   const markNoShow = useReservationsStore((s) => s.markNoShow)
   const cancel = useReservationsStore((s) => s.cancel)
-  const seatReservation = useTablesStore((s) => s.seatReservation)
-  const markArrived = useTablesStore((s) => s.markArrived)
+
+  useEffect(() => {
+    initReservations()
+  }, [initReservations])
 
   const [adding, setAdding] = useState(false)
   const [guestName, setGuestName] = useState('')
@@ -318,17 +322,14 @@ function ReservationsView({ tables }: { tables: ReturnType<typeof useTablesStore
   }
 
   function handleAssign(reservationId: string, tableId: string) {
-    const res = reservations.find((r) => r.id === reservationId)!
     assignTable(reservationId, tableId)
-    seatReservation(tableId, res.guestName, res.partySize)
     setAssigningId(null)
   }
 
   function handleArrived(reservationId: string, tableId: string) {
-    markArrived(tableId)
-    // Reservation stays visible under "upcoming" filter only until table state flips —
-    // in the real app this would move to a "seated" list. Kept simple here.
-    cancel(reservationId) // removes from upcoming list; table is now occupied, which is what matters
+    // Same effect as a fresh assignment — seats the table and marks the
+    // reservation 'seated', which is what actually removes it from "upcoming".
+    assignTable(reservationId, tableId)
   }
 
   return (
@@ -354,15 +355,22 @@ function ReservationsView({ tables }: { tables: ReturnType<typeof useTablesStore
       )}
 
       <div className="space-y-2">
-        {upcoming.length === 0 && <p className="text-sm text-ink/40 text-center py-8">No upcoming reservations.</p>}
-        {upcoming.map((r) => (
+        {reservationsLoading ? (
+          <div className="h-20 rounded-2xl bg-ink/5 animate-pulse" />
+        ) : upcoming.length === 0 ? (
+          <p className="text-sm text-ink/40 text-center py-8">No upcoming reservations.</p>
+        ) : (
+          upcoming.map((r) => (
           <Card key={r.id} className="p-4">
             <div className="flex justify-between items-start mb-1">
               <div>
                 <div className="font-semibold text-sm">{r.guestName}</div>
                 <div className="text-xs text-ink/40">{r.phone} · {r.partySize} guests · {new Date(r.arrivalTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
               </div>
-              <button onClick={() => markNoShow(r.id)} className="text-xs font-semibold text-ink/40 hover:text-status-cleaning">No-show</button>
+              <div className="flex items-center gap-3">
+                <button onClick={() => cancel(r.id)} className="text-xs font-semibold text-ink/40 hover:text-ink">Cancel</button>
+                <button onClick={() => markNoShow(r.id)} className="text-xs font-semibold text-ink/40 hover:text-status-cleaning">No-show</button>
+              </div>
             </div>
             {r.specialRequests && <p className="text-xs text-ink/50 mb-2">📝 {r.specialRequests}</p>}
 
@@ -385,7 +393,8 @@ function ReservationsView({ tables }: { tables: ReturnType<typeof useTablesStore
               </button>
             )}
           </Card>
-        ))}
+          ))
+        )}
       </div>
     </div>
   )

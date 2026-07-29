@@ -426,37 +426,159 @@ $$;
 grant execute on function link_staff_account() to authenticated;
 
 -- ============================================================================
--- Row Level Security — enable + starter policies
--- Real policies should key off staff.role and permissions, scoped by
--- branch_id. Below is the pattern to extend per table.
+-- Row Level Security — every table, branch-scoped.
+--
+-- The model: any signed-in staff member can read/write any row that belongs
+-- to their own branch (via current_staff_branch()), and nothing outside it.
+-- This is branch ISOLATION, not per-role permissions — a waiter and a
+-- manager have the same database-level access; the app's own
+-- staff/permissions system (Settings > Staff) is what hides/shows features
+-- per role in the UI. Adding real per-role database restrictions on top of
+-- this is a reasonable future layer, not done here.
+--
+-- current_staff_branch() is SECURITY DEFINER deliberately — it has to read
+-- the `staff` table to resolve your branch, and `staff` itself has RLS
+-- enabled below, which would otherwise make this function unable to see
+-- even its own caller's row (a lookup deadlock). SECURITY DEFINER lets this
+-- one narrow, read-only, auth.uid()-scoped lookup bypass RLS internally —
+-- it still only ever returns the branch of whoever is actually calling it.
 -- ============================================================================
-alter table restaurant_tables enable row level security;
-alter table orders enable row level security;
-alter table order_items enable row level security;
-alter table staff enable row level security;
-
--- Example: any authenticated staff member can read/write tables in their own branch.
--- Requires a helper that maps auth.uid() -> staff row -> branch_id.
-create or replace function current_staff_branch() returns uuid as $$
+create or replace function current_staff_branch() returns uuid
+language sql stable security definer as $$
   select branch_id from staff where auth_user_id = auth.uid() limit 1;
-$$ language sql stable;
+$$;
 
-create policy "staff can access their branch tables"
-  on restaurant_tables for all
-  using (branch_id = current_staff_branch())
-  with check (branch_id = current_staff_branch());
+-- branches: a staff member can see/edit only their own branch's row (not
+-- create or delete branches from the client — that stays an admin/SQL task).
+alter table branches enable row level security;
+create policy "staff can access their own branch" on branches for select
+  using (id = current_staff_branch());
+create policy "staff can update their own branch" on branches for update
+  using (id = current_staff_branch()) with check (id = current_staff_branch());
 
-create policy "staff can access their branch orders"
-  on orders for all
-  using (branch_id = current_staff_branch())
-  with check (branch_id = current_staff_branch());
+-- Tables with a direct branch_id column — the simple case.
+alter table restaurant_settings enable row level security;
+create policy "staff can access their branch restaurant_settings" on restaurant_settings for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table payment_methods enable row level security;
+create policy "staff can access their branch payment_methods" on payment_methods for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table accounts enable row level security;
+create policy "staff can access their branch accounts" on accounts for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table staff enable row level security;
+create policy "staff can access their branch staff" on staff for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table restaurant_tables enable row level security;
+create policy "staff can access their branch tables" on restaurant_tables for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table reservations enable row level security;
+create policy "staff can access their branch reservations" on reservations for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table menu_categories enable row level security;
+create policy "staff can access their branch menu_categories" on menu_categories for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table menu_items enable row level security;
+create policy "staff can access their branch menu_items" on menu_items for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table shifts enable row level security;
+create policy "staff can access their branch shifts" on shifts for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table customers enable row level security;
+create policy "staff can access their branch customers" on customers for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table orders enable row level security;
+create policy "staff can access their branch orders" on orders for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table inventory_items enable row level security;
+create policy "staff can access their branch inventory_items" on inventory_items for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table suppliers enable row level security;
+create policy "staff can access their branch suppliers" on suppliers for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table purchases enable row level security;
+create policy "staff can access their branch purchases" on purchases for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table expenses enable row level security;
+create policy "staff can access their branch expenses" on expenses for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+-- Child tables with no branch_id of their own — scoped through their parent.
+-- order_items was previously RLS-enabled with NO policy at all (an oversight
+-- in the original starter pattern that would have silently blocked all
+-- Kitchen/Orders/Billing access the moment RLS was switched on) — fixed here.
+alter table order_items enable row level security;
+create policy "staff can access their branch order_items" on order_items for all
+  using (exists (select 1 from orders where orders.id = order_items.order_id and orders.branch_id = current_staff_branch()))
+  with check (exists (select 1 from orders where orders.id = order_items.order_id and orders.branch_id = current_staff_branch()));
+
+alter table payments enable row level security;
+create policy "staff can access their branch payments" on payments for all
+  using (exists (select 1 from orders where orders.id = payments.order_id and orders.branch_id = current_staff_branch()))
+  with check (exists (select 1 from orders where orders.id = payments.order_id and orders.branch_id = current_staff_branch()));
+
+alter table ledger_entries enable row level security;
+create policy "staff can access their branch ledger_entries" on ledger_entries for all
+  using (exists (select 1 from accounts where accounts.id = ledger_entries.account_id and accounts.branch_id = current_staff_branch()))
+  with check (exists (select 1 from accounts where accounts.id = ledger_entries.account_id and accounts.branch_id = current_staff_branch()));
+
+alter table permissions enable row level security;
+create policy "staff can access their branch permissions" on permissions for all
+  using (exists (select 1 from staff where staff.id = permissions.staff_id and staff.branch_id = current_staff_branch()))
+  with check (exists (select 1 from staff where staff.id = permissions.staff_id and staff.branch_id = current_staff_branch()));
+
+alter table menu_modifiers enable row level security;
+create policy "staff can access their branch menu_modifiers" on menu_modifiers for all
+  using (exists (select 1 from menu_items where menu_items.id = menu_modifiers.menu_item_id and menu_items.branch_id = current_staff_branch()))
+  with check (exists (select 1 from menu_items where menu_items.id = menu_modifiers.menu_item_id and menu_items.branch_id = current_staff_branch()));
+
+alter table menu_item_combo_components enable row level security;
+create policy "staff can access their branch menu_item_combo_components" on menu_item_combo_components for all
+  using (exists (select 1 from menu_items where menu_items.id = menu_item_combo_components.combo_item_id and menu_items.branch_id = current_staff_branch()))
+  with check (exists (select 1 from menu_items where menu_items.id = menu_item_combo_components.combo_item_id and menu_items.branch_id = current_staff_branch()));
+
+alter table shift_balances enable row level security;
+create policy "staff can access their branch shift_balances" on shift_balances for all
+  using (exists (select 1 from shifts where shifts.id = shift_balances.shift_id and shifts.branch_id = current_staff_branch()))
+  with check (exists (select 1 from shifts where shifts.id = shift_balances.shift_id and shifts.branch_id = current_staff_branch()));
+
+alter table stock_movements enable row level security;
+create policy "staff can access their branch stock_movements" on stock_movements for all
+  using (exists (select 1 from inventory_items where inventory_items.id = stock_movements.inventory_item_id and inventory_items.branch_id = current_staff_branch()))
+  with check (exists (select 1 from inventory_items where inventory_items.id = stock_movements.inventory_item_id and inventory_items.branch_id = current_staff_branch()));
+
+alter table purchase_lines enable row level security;
+create policy "staff can access their branch purchase_lines" on purchase_lines for all
+  using (exists (select 1 from purchases where purchases.id = purchase_lines.purchase_id and purchases.branch_id = current_staff_branch()))
+  with check (exists (select 1 from purchases where purchases.id = purchase_lines.purchase_id and purchases.branch_id = current_staff_branch()));
+
+alter table purchase_payments enable row level security;
+create policy "staff can access their branch purchase_payments" on purchase_payments for all
+  using (exists (select 1 from purchases where purchases.id = purchase_payments.purchase_id and purchases.branch_id = current_staff_branch()))
+  with check (exists (select 1 from purchases where purchases.id = purchase_payments.purchase_id and purchases.branch_id = current_staff_branch()));
+
+alter table dismissed_notifications enable row level security;
+create policy "staff can access their branch dismissed_notifications" on dismissed_notifications for all
+  using (exists (select 1 from staff where staff.id = dismissed_notifications.staff_id and staff.branch_id = current_staff_branch()))
+  with check (exists (select 1 from staff where staff.id = dismissed_notifications.staff_id and staff.branch_id = current_staff_branch()));
 
 -- NOTE: PIN-based floor staff (no Supabase auth_user_id) authenticate through
 -- an Edge Function that verifies the PIN hash and issues a short-lived
 -- signed session (or a scoped Supabase JWT via a custom auth hook). Do not
 -- relax RLS to make client-side PIN comparisons work — that recreates the
--- exact vulnerability being fixed.
---
--- Extend the same "staff can access their branch X" policy to every other
--- table above before going live — RLS is opt-in per table, and only the four
--- above are enabled so far.
+-- exact vulnerability being fixed. (Superseded by real Google sign-in —
+-- see authStore.ts / link_staff_account() above.)

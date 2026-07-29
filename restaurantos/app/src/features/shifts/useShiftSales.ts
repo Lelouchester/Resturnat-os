@@ -73,22 +73,36 @@ export function useShiftLedger(shiftId: string | undefined, openedAt: string | u
   return { byMethod, orderCount, loading }
 }
 
+export interface OrderHistoryLine {
+  name: string
+  quantity: number
+  unitPrice: number
+}
+
 export interface OrderHistoryRow {
   id: string
   tableLabel: string
+  customerName: string
   closedAt: string
   itemsSummary: string
+  lines: OrderHistoryLine[]
   subtotal: number
   discountAmount: number
+  serviceCharge: number
+  taxAmount: number
+  tipAmount: number
   total: number
 }
 
 // Completed (paid) orders in a date range, newest first, for the Order
-// History list and CSV export — capped at `limit` (default 50).
+// History list, CSV export, and reprinting a past receipt — capped at
+// `limit` (default 50).
 export async function fetchOrderHistory(fromISO: string, toISO: string, limit = 50): Promise<OrderHistoryRow[]> {
   const { data, error } = await supabase
     .from('orders')
-    .select('id, closed_at, subtotal, discount_amount, total, restaurant_tables ( label ), order_items ( quantity, custom_name, is_complimentary, status, menu_items ( name ) )')
+    .select(
+      'id, closed_at, subtotal, discount_amount, service_charge, tax_amount, tip_amount, total, restaurant_tables ( label ), customers ( name ), order_items ( quantity, unit_price, custom_name, is_complimentary, status, menu_items ( name ) )'
+    )
     .eq('status', 'paid')
     .gte('closed_at', fromISO)
     .lte('closed_at', toISO)
@@ -100,16 +114,25 @@ export async function fetchOrderHistory(fromISO: string, toISO: string, limit = 
     return []
   }
 
-  return (data ?? []).map((o: any) => ({
-    id: o.id,
-    tableLabel: o.restaurant_tables?.label ?? '—',
-    closedAt: o.closed_at,
-    itemsSummary: (o.order_items ?? [])
-      .filter((i: any) => i.status !== 'void')
-      .map((i: any) => `${i.quantity}x ${i.custom_name ?? i.menu_items?.name ?? 'Item'}`)
-      .join(', '),
-    subtotal: Number(o.subtotal) || 0,
-    discountAmount: Number(o.discount_amount) || 0,
-    total: Number(o.total) || 0,
-  }))
+  return (data ?? []).map((o: any) => {
+    const activeItems = (o.order_items ?? []).filter((i: any) => i.status !== 'void')
+    return {
+      id: o.id,
+      tableLabel: o.restaurant_tables?.label ?? '—',
+      customerName: o.customers?.name ?? 'Walk-in',
+      closedAt: o.closed_at,
+      itemsSummary: activeItems.map((i: any) => `${i.quantity}x ${i.custom_name ?? i.menu_items?.name ?? 'Item'}`).join(', '),
+      lines: activeItems.map((i: any) => ({
+        name: i.custom_name ?? i.menu_items?.name ?? 'Item',
+        quantity: i.quantity,
+        unitPrice: i.is_complimentary ? 0 : Number(i.unit_price),
+      })),
+      subtotal: Number(o.subtotal) || 0,
+      discountAmount: Number(o.discount_amount) || 0,
+      serviceCharge: Number(o.service_charge) || 0,
+      taxAmount: Number(o.tax_amount) || 0,
+      tipAmount: Number(o.tip_amount) || 0,
+      total: Number(o.total) || 0,
+    }
+  })
 }

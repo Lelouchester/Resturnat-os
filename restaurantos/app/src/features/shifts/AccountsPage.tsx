@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { PlayCircle, StopCircle, Download, History, Maximize2, X } from 'lucide-react'
+import { PlayCircle, StopCircle, Download, History, Maximize2, X, Printer } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
+import { ReceiptView } from '../billing/ReceiptView'
 import { useShiftStore } from './shiftStore'
 import { useSettingsStore } from '../settings/settingsStore'
 import { useShiftLedger, fetchOrderHistory, type OrderHistoryRow } from './useShiftSales'
@@ -87,6 +88,15 @@ export function AccountsPage() {
   }
 
   const allCounted = paymentMethods.every((m) => counted[m.key] !== undefined && counted[m.key] !== '')
+  const [printingOrder, setPrintingOrder] = useState<OrderHistoryRow | null>(null)
+
+  useEffect(() => {
+    if (!printingOrder) return
+    const handle = () => setPrintingOrder(null)
+    window.addEventListener('afterprint', handle)
+    window.print()
+    return () => window.removeEventListener('afterprint', handle)
+  }, [printingOrder])
 
   if (shiftLoading) {
     return (
@@ -101,7 +111,8 @@ export function AccountsPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 max-w-2xl mx-auto">
+    <>
+    <div className="p-4 md:p-6 max-w-2xl mx-auto print:hidden">
       <div className="mb-4">
         <h1 className="font-ticket text-xl font-bold">Accounts</h1>
         <p className="text-sm text-ink/50">Start of day, end of day, sales, and order history</p>
@@ -250,7 +261,7 @@ export function AccountsPage() {
         </>
       )}
 
-      <OrderHistoryCard />
+      <OrderHistoryCard onPrint={setPrintingOrder} />
 
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-ink text-paper px-4 py-2.5 rounded-full text-sm font-semibold shadow-lg">
@@ -258,6 +269,20 @@ export function AccountsPage() {
         </div>
       )}
     </div>
+    {printingOrder && (
+      <ReceiptView
+        tableLabel={printingOrder.tableLabel}
+        customerName={printingOrder.customerName}
+        lines={printingOrder.lines}
+        subtotal={printingOrder.subtotal}
+        discount={printingOrder.discountAmount}
+        serviceCharge={printingOrder.serviceCharge}
+        tax={printingOrder.taxAmount}
+        tip={printingOrder.tipAmount}
+        total={printingOrder.total}
+      />
+    )}
+    </>
   )
 }
 
@@ -267,7 +292,7 @@ function todayISO(daysAgo = 0) {
   return d.toISOString().slice(0, 10)
 }
 
-function OrderHistoryCard() {
+function OrderHistoryCard({ onPrint }: { onPrint: (row: OrderHistoryRow) => void }) {
   const [from, setFrom] = useState(todayISO(0))
   const [to, setTo] = useState(todayISO(0))
   const [rows, setRows] = useState<OrderHistoryRow[] | null>(null)
@@ -294,13 +319,7 @@ function OrderHistoryCard() {
     <>
       <div className="max-h-72 overflow-y-auto space-y-1.5 mb-2">
         {(rows ?? []).map((r) => (
-          <div key={r.id} className="flex items-center justify-between text-sm border-b border-ink/5 pb-1.5">
-            <div className="min-w-0">
-              <div className="font-semibold">{r.tableLabel} <span className="text-ink/40 font-normal text-xs">{new Date(r.closedAt).toLocaleString()}</span></div>
-              <div className="text-xs text-ink/40 truncate">{r.itemsSummary}</div>
-            </div>
-            <div className="font-ticket font-semibold shrink-0 ml-2">Rs. {r.total}</div>
-          </div>
+          <HistoryRow key={r.id} row={r} onPrint={onPrint} />
         ))}
       </div>
       <div className="flex justify-between text-sm pt-1 border-t border-ink/10">
@@ -365,13 +384,7 @@ function OrderHistoryCard() {
             <div className="overflow-y-auto flex-1">
               <div className="space-y-1.5 mb-2">
                 {(rows ?? []).map((r) => (
-                  <div key={r.id} className="flex items-center justify-between text-sm border-b border-ink/5 pb-1.5">
-                    <div className="min-w-0">
-                      <div className="font-semibold">{r.tableLabel} <span className="text-ink/40 font-normal text-xs">{new Date(r.closedAt).toLocaleString()}</span></div>
-                      <div className="text-xs text-ink/40 truncate">{r.itemsSummary}</div>
-                    </div>
-                    <div className="font-ticket font-semibold shrink-0 ml-2">Rs. {r.total}</div>
-                  </div>
+                  <HistoryRow key={r.id} row={r} onPrint={onPrint} />
                 ))}
               </div>
             </div>
@@ -383,6 +396,23 @@ function OrderHistoryCard() {
         </div>
       )}
     </>
+  )
+}
+
+function HistoryRow({ row, onPrint }: { row: OrderHistoryRow; onPrint: (row: OrderHistoryRow) => void }) {
+  return (
+    <div className="flex items-center justify-between text-sm border-b border-ink/5 pb-1.5">
+      <div className="min-w-0">
+        <div className="font-semibold">{row.tableLabel} <span className="text-ink/40 font-normal text-xs">{new Date(row.closedAt).toLocaleString()}</span></div>
+        <div className="text-xs text-ink/40 truncate">{row.itemsSummary}</div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0 ml-2">
+        <span className="font-ticket font-semibold">Rs. {row.total}</span>
+        <button onClick={() => onPrint(row)} className="text-ink/30 hover:text-ink" title="Print receipt">
+          <Printer size={14} />
+        </button>
+      </div>
+    </div>
   )
 }
 

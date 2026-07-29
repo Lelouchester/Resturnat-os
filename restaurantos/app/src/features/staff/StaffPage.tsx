@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, X, ShieldCheck } from 'lucide-react'
+import { Plus, X, ShieldCheck, Pencil, Check } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
 import { useStaffStore } from './staffStore'
@@ -21,6 +21,7 @@ export function StaffPage() {
   const init = useStaffStore((s) => s.init)
   const addStaff = useStaffStore((s) => s.addStaff)
   const updateRole = useStaffStore((s) => s.updateRole)
+  const updateName = useStaffStore((s) => s.updateName)
   const toggleActive = useStaffStore((s) => s.toggleActive)
 
   useEffect(() => {
@@ -32,6 +33,8 @@ export function StaffPage() {
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<StaffRole>('waiter')
   const [permissionsFor, setPermissionsFor] = useState<StaffMember | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
 
@@ -118,7 +121,33 @@ export function StaffPage() {
             <Card key={s.id} className={`p-4 ${s.isActive ? '' : 'opacity-50'}`}>
               <div className="flex items-center justify-between mb-2">
                 <div>
-                  <div className="font-semibold text-sm">{s.name}</div>
+                  {renamingId === s.id ? (
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <input
+                        autoFocus
+                        value={renameDraft}
+                        onChange={(e) => setRenameDraft(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && renameDraft.trim() && (updateName(s.id, renameDraft.trim()), setRenamingId(null))}
+                        className="text-sm font-semibold border-b border-ember outline-none bg-transparent"
+                      />
+                      <button
+                        onClick={() => { if (renameDraft.trim()) updateName(s.id, renameDraft.trim()); setRenamingId(null) }}
+                        className="text-status-available"
+                      >
+                        <Check size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-sm">{s.name}</span>
+                      <button
+                        onClick={() => { setRenamingId(s.id); setRenameDraft(s.name) }}
+                        className="text-ink/25 hover:text-ink"
+                      >
+                        <Pencil size={11} />
+                      </button>
+                    </div>
+                  )}
                   <div className="text-xs text-ink/40">{s.email}</div>
                   <select
                     value={s.role}

@@ -18,6 +18,7 @@ interface StaffState {
   init: () => void
   addStaff: (name: string, email: string, role: StaffRole) => Promise<void>
   updateRole: (id: string, role: StaffRole) => Promise<void>
+  updateName: (id: string, name: string) => Promise<void>
   toggleActive: (id: string) => Promise<void>
   setPermission: (id: string, feature: FeatureKey, allowed: boolean) => Promise<void>
 }
@@ -89,6 +90,12 @@ export const useStaffStore = create<StaffState>((set, get) => ({
   updateRole: async (id, role) => {
     const { error } = await supabase.from('staff').update({ role }).eq('id', id)
     if (error) console.error('[staffStore] updateRole failed', error)
+    set({ staff: await loadStaff() })
+  },
+
+  updateName: async (id, name) => {
+    const { error } = await supabase.from('staff').update({ name }).eq('id', id)
+    if (error) console.error('[staffStore] updateName failed', error)
     set({ staff: await loadStaff() })
   },
 
