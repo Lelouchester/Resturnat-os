@@ -35,6 +35,7 @@ interface OrdersState {
   markItemsServed: (itemIds: string[]) => Promise<void>
   voidItem: (itemId: string, reason: string) => Promise<void>
   beginBilling: (tableId: string) => Promise<void>
+  attachCustomer: (tableId: string, customerId: string) => Promise<void>
   transferOrderTable: (fromTableId: string, toTableId: string) => Promise<void>
   mergeOrders: (fromTableId: string, intoTableId: string) => Promise<void>
   unmergeOrder: (orderId: string) => Promise<void>
@@ -243,6 +244,18 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       .eq('status', 'occupied')
   },
 
+  attachCustomer: async (tableId, customerId) => {
+    // If an order already exists for this table, link it right away — that
+    // way Billing shows the customer already attached instead of needing to
+    // search again at payment time.
+    const order = get().getOrderForTable(tableId)
+    if (order) {
+      const { error } = await supabase.from('orders').update({ customer_id: customerId }).eq('id', order.id)
+      if (error) console.error('[ordersStore] attachCustomer failed', error)
+      set({ orders: await loadOpenOrders() })
+    }
+  },
+
   transferOrderTable: async (fromTableId, toTableId) => {
     const order = get().getOrderForTable(fromTableId)
     const fromTable = useTablesStore.getState().tables.find((t) => t.id === fromTableId)
@@ -259,6 +272,8 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       .update({
         status: fromTable.status,
         customer_name: fromTable.customerName ?? null,
+        customer_phone: fromTable.customerPhone ?? null,
+        customer_id: fromTable.customerId ?? null,
         guest_count: fromTable.guestCount ?? null,
         seated_at: fromTable.seatedAt ?? null,
       })

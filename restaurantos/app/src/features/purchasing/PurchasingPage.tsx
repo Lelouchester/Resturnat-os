@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Plus, X, PackageCheck, Phone, Receipt, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Plus, X, PackageCheck, Phone, Receipt, Trash2, Download } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
 import { usePurchasingStore } from './purchasingStore'
@@ -10,6 +10,7 @@ import { CATEGORY_LABELS } from './types'
 import type { PurchaseLine, PurchaseCategory } from './types'
 
 const NEW_ITEM_SENTINEL = '__new__'
+const NEW_SUPPLIER_SENTINEL = '__new_supplier__'
 
 export function PurchasingPage() {
   const suppliers = usePurchasingStore((s) => s.suppliers)
@@ -41,6 +42,17 @@ export function PurchasingPage() {
   const [creatingPurchase, setCreatingPurchase] = useState(false)
   const [payingSupplier, setPayingSupplier] = useState<string | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
+  const [historyFrom, setHistoryFrom] = useState(() => new Date().toISOString().slice(0, 10))
+  const [historyTo, setHistoryTo] = useState(() => new Date().toISOString().slice(0, 10))
+
+  const purchasesInRange = useMemo(() => {
+    const from = new Date(`${historyFrom}T00:00:00`).getTime()
+    const to = new Date(`${historyTo}T23:59:59`).getTime()
+    return purchases.filter((p) => {
+      const t = new Date(p.createdAt).getTime()
+      return t >= from && t <= to
+    })
+  }, [purchases, historyFrom, historyTo])
 
   async function handleRemoveSupplier(id: string) {
     const result = await removeSupplier(id)
@@ -89,7 +101,12 @@ export function PurchasingPage() {
       {/* Suppliers */}
       <div className="flex items-center justify-between mb-2">
         <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40">Suppliers</div>
-        <button onClick={() => setAddingSupplier(true)} className="text-xs font-semibold text-ember">+ Add supplier</button>
+        <button
+          onClick={() => setAddingSupplier(true)}
+          className="flex items-center gap-1 text-xs font-semibold text-ember bg-ember/10 rounded-full px-3 py-1.5"
+        >
+          <Plus size={13} /> Add supplier
+        </button>
       </div>
 
       {addingSupplier && (
@@ -146,12 +163,32 @@ export function PurchasingPage() {
       </div>
 
       {/* Purchase history */}
-      <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-2">Purchase history</div>
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40">Purchase history</div>
+        <div className="flex items-end gap-2 flex-wrap">
+          <div>
+            <label className="text-[10px] font-semibold text-ink/40 block">From</label>
+            <input type="date" value={historyFrom} onChange={(e) => setHistoryFrom(e.target.value)} className="text-xs border border-ink/10 rounded-lg px-2 py-1 outline-none focus:border-ember" />
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold text-ink/40 block">To</label>
+            <input type="date" value={historyTo} onChange={(e) => setHistoryTo(e.target.value)} className="text-xs border border-ink/10 rounded-lg px-2 py-1 outline-none focus:border-ember" />
+          </div>
+          {purchasesInRange.length > 0 && (
+            <button
+              onClick={() => downloadPurchasesCsv(historyFrom, historyTo, purchasesInRange, suppliers, paymentMethods)}
+              className="flex items-center gap-1 text-xs font-semibold text-ember bg-ember/10 rounded-full px-3 py-1.5"
+            >
+              <Download size={13} /> Export CSV
+            </button>
+          )}
+        </div>
+      </div>
       <div className="space-y-2">
-        {purchases.length === 0 && (
-          <p className="text-sm text-ink/40 text-center py-8">No purchases recorded yet.</p>
+        {purchasesInRange.length === 0 && (
+          <p className="text-sm text-ink/40 text-center py-8">No purchases in this range.</p>
         )}
-        {[...purchases].reverse().map((p) => {
+        {[...purchasesInRange].reverse().map((p) => {
           const supplier = suppliers.find((s) => s.id === p.supplierId)
           const total = p.lines.reduce((sum, l) => sum + l.quantity * l.unitCost, 0)
           const paidEntries = Object.entries(p.paidAmounts).filter(([, amt]) => amt > 0)
@@ -205,6 +242,7 @@ export function PurchasingPage() {
           inventoryItems={inventoryItems}
           paymentMethods={paymentMethods}
           addInventoryItem={addInventoryItem}
+          addSupplier={addSupplier}
           onSubmit={(input) => createPurchase(input)}
         />
       )}
@@ -228,6 +266,7 @@ function NewPurchaseModal({
   inventoryItems,
   paymentMethods,
   addInventoryItem,
+  addSupplier,
 }: {
   onClose: () => void
   onSubmit: (input: { supplierId?: string; category: PurchaseCategory; lines: PurchaseLine[]; received: boolean; paidAmounts: Record<string, number> }) => void
@@ -235,8 +274,10 @@ function NewPurchaseModal({
   inventoryItems: { id: string; name: string }[]
   paymentMethods: { key: string; label: string }[]
   addInventoryItem: (name: string, unit: string, minStock: number) => Promise<string>
+  addSupplier: (name: string, phone?: string) => Promise<string>
 }) {
   const [supplierId, setSupplierId] = useState<string>('')
+  const [newSupplierDraft, setNewSupplierDraft] = useState<string | null>(null)
   const [category, setCategory] = useState<PurchaseCategory>('ingredients')
   const [lines, setLines] = useState<PurchaseLine[]>([
     { id: `l-${Date.now()}`, kind: 'inventory', inventoryItemId: inventoryItems[0]?.id, description: inventoryItems[0]?.name ?? '', quantity: 1, unitCost: 0 },
@@ -293,16 +334,41 @@ function NewPurchaseModal({
         <div className="grid grid-cols-2 gap-2 mb-4">
           <div>
             <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Supplier</label>
-            <select
-              value={supplierId}
-              onChange={(e) => setSupplierId(e.target.value)}
-              className="w-full text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember bg-surface"
-            >
-              <option value="">No supplier (one-off)</option>
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
+            {newSupplierDraft !== null ? (
+              <div className="flex items-center gap-1.5">
+                <input
+                  autoFocus
+                  value={newSupplierDraft}
+                  onChange={(e) => setNewSupplierDraft(e.target.value)}
+                  placeholder="New supplier name"
+                  className="flex-1 text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
+                />
+                <button
+                  onClick={async () => {
+                    if (!newSupplierDraft.trim()) return
+                    const id = await addSupplier(newSupplierDraft.trim())
+                    setSupplierId(id)
+                    setNewSupplierDraft(null)
+                  }}
+                  className="text-xs font-semibold text-ember px-2"
+                >
+                  Save
+                </button>
+                <button onClick={() => setNewSupplierDraft(null)} className="text-ink/40 px-1"><X size={16} /></button>
+              </div>
+            ) : (
+              <select
+                value={supplierId}
+                onChange={(e) => (e.target.value === NEW_SUPPLIER_SENTINEL ? setNewSupplierDraft('') : setSupplierId(e.target.value))}
+                className="w-full text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember bg-surface"
+              >
+                <option value="">No supplier (one-off)</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+                <option value={NEW_SUPPLIER_SENTINEL}>+ Add new supplier…</option>
+              </select>
+            )}
           </div>
           <div>
             <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Category</label>
@@ -493,4 +559,37 @@ function PaySupplierModal({
       </div>
     </div>
   )
+}
+
+function downloadPurchasesCsv(
+  from: string,
+  to: string,
+  purchases: { id: string; supplierId?: string; category: string; status: string; createdAt: string; lines: PurchaseLine[]; paidAmounts: Record<string, number> }[],
+  suppliers: { id: string; name: string }[],
+  paymentMethods: { key: string; label: string }[]
+) {
+  const header = ['Date', 'Supplier', 'Category', 'Status', 'Items', 'Total', ...paymentMethods.map((m) => m.label)]
+  const rows = purchases.map((p) => {
+    const supplier = suppliers.find((s) => s.id === p.supplierId)?.name ?? 'One-off'
+    const total = p.lines.reduce((s, l) => s + l.quantity * l.unitCost, 0)
+    const items = p.lines.map((l) => `${l.quantity}x ${l.description}`).join('; ')
+    const methodAmounts = paymentMethods.map((m) => p.paidAmounts[m.key] || 0)
+    return [
+      new Date(p.createdAt).toLocaleString(),
+      supplier,
+      p.category,
+      p.status,
+      `"${items.replace(/"/g, '""')}"`,
+      total,
+      ...methodAmounts,
+    ].join(',')
+  })
+  const csv = [header.join(','), ...rows].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `purchases_${from}_to_${to}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
 }

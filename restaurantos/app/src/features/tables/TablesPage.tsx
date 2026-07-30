@@ -6,6 +6,7 @@ import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
 import { useTablesStore } from './tablesStore'
 import { useOrdersStore } from '../orders/ordersStore'
+import { CustomerAssignField } from '../customers/CustomerAssignField'
 import { useReservationsStore } from '../reservations/reservationsStore'
 
 const FILTERS = ['All', 'Available', 'Occupied', 'Reserved', 'Billing'] as const
@@ -15,6 +16,7 @@ export function TablesPage() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('All')
   const [transferringId, setTransferringId] = useState<string | null>(null)
   const [mergingId, setMergingId] = useState<string | null>(null)
+  const [assigningCustomerId, setAssigningCustomerId] = useState<string | null>(null)
   const [addingTable, setAddingTable] = useState(false)
   const navigate = useNavigate()
 
@@ -27,6 +29,8 @@ export function TablesPage() {
   const initOrders = useOrdersStore((s) => s.init)
   const transferOrderTable = useOrdersStore((s) => s.transferOrderTable)
   const mergeOrders = useOrdersStore((s) => s.mergeOrders)
+  const attachCustomer = useOrdersStore((s) => s.attachCustomer)
+  const updateGuestInfo = useTablesStore((s) => s.updateGuestInfo)
 
   const totalsByTable = useMemo(() => {
     const map = new Map<string, number>()
@@ -126,6 +130,7 @@ export function TablesPage() {
                   onSelect={handleSelectTable}
                   onMove={setTransferringId}
                   onMerge={setMergingId}
+                  onAssignCustomer={setAssigningCustomerId}
                   onMarkCleaned={markCleaned}
                   runningTotal={totalsByTable.get(t.id)}
                 />
@@ -154,6 +159,31 @@ export function TablesPage() {
           onConfirm={(intoId) => { mergeOrders(mergingId, intoId); setMergingId(null) }}
         />
       )}
+
+      {assigningCustomerId && (() => {
+        const t = tables.find((tt) => tt.id === assigningCustomerId)!
+        return (
+          <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setAssigningCustomerId(null)} />
+            <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-ticket text-lg font-bold">Customer for {t.label}</h2>
+                <button onClick={() => setAssigningCustomerId(null)} className="text-ink/40"><X size={20} /></button>
+              </div>
+              <CustomerAssignField
+                currentName={t.customerName}
+                currentPhone={t.customerPhone}
+                autoEdit
+                onAssign={(c) => {
+                  updateGuestInfo(t.id, { customerName: c.name, customerPhone: c.phone })
+                  attachCustomer(t.id, c.id)
+                  setAssigningCustomerId(null)
+                }}
+              />
+            </div>
+          </div>
+        )
+      })()}
 
       {addingTable && (
         <AddTableModal onClose={() => setAddingTable(false)} onAdd={(label, seats) => { addTable(label, seats); setAddingTable(false) }} />

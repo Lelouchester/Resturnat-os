@@ -6,6 +6,7 @@ import { ReceiptView } from '../billing/ReceiptView'
 import { useShiftStore } from './shiftStore'
 import { useSettingsStore } from '../settings/settingsStore'
 import { useShiftLedger, fetchOrderHistory, type OrderHistoryRow } from './useShiftSales'
+import { usePurchasingStore } from '../purchasing/purchasingStore'
 import type { MethodBalances } from './types'
 
 function useElapsedTime(since?: string) {
@@ -76,15 +77,29 @@ export function AccountsPage() {
     return (shift?.opening[key] ?? 0) + l.revenue - l.purchases
   }
 
-  function handleEndShift() {
+  const [lastBackup, setLastBackup] = useState<Awaited<ReturnType<typeof buildDailyBackup>> | null>(null)
+  const [backingUp, setBackingUp] = useState(false)
+
+  async function handleEndShift() {
     const closingBalances: MethodBalances = {}
     paymentMethods.forEach((m) => (closingBalances[m.key] = Number(counted[m.key]) || 0))
+
+    setBackingUp(true)
+    const backup = await buildDailyBackup(shift, byMethod, closingBalances)
+    downloadBackupJson(backup)
+    setBackingUp(false)
+    setLastBackup(backup)
+
     endShift(closingBalances)
     setOpening(closingBalances)
     setClosingState(false)
     setCounted({})
-    setToast('Day closed — tomorrow starts pre-filled with these counts')
+    setToast('Day closed — backup downloaded')
     setTimeout(() => setToast(null), 3000)
+  }
+
+  function redownloadBackup() {
+    if (lastBackup) downloadBackupJson(lastBackup)
   }
 
   const allCounted = paymentMethods.every((m) => counted[m.key] !== undefined && counted[m.key] !== '')
@@ -117,6 +132,18 @@ export function AccountsPage() {
         <h1 className="font-ticket text-xl font-bold">Accounts</h1>
         <p className="text-sm text-ink/50">Start of day, end of day, sales, and order history</p>
       </div>
+
+      {lastBackup && !shift && (
+        <Card className="p-4 mb-4 flex items-center justify-between bg-status-available-bg/40">
+          <div className="text-sm">
+            <div className="font-semibold">Today's backup downloaded</div>
+            <div className="text-xs text-ink/50">{lastBackup.orders.length} orders, {lastBackup.purchases.length} purchases</div>
+          </div>
+          <button onClick={redownloadBackup} className="flex items-center gap-1.5 text-xs font-semibold text-ember bg-ember/10 rounded-full px-3 py-1.5">
+            <Download size={13} /> Download again
+          </button>
+        </Card>
+      )}
 
       {!shift ? (
         <Card className="p-5 mb-4">
@@ -254,7 +281,9 @@ export function AccountsPage() {
 
               <div className="flex gap-2">
                 <Button variant="secondary" className="flex-1" onClick={() => { setClosingState(false); setCounted({}) }}>Cancel</Button>
-                <Button variant="danger" className="flex-1" disabled={!allCounted} onClick={handleEndShift}>Confirm & close day</Button>
+                <Button variant="danger" className="flex-1" disabled={!allCounted || backingUp} onClick={handleEndShift}>
+                  {backingUp ? 'Preparing backup…' : 'Confirm & close day'}
+                </Button>
               </div>
             </Card>
           )}
@@ -284,6 +313,47 @@ export function AccountsPage() {
     )}
     </>
   )
+}
+
+// Everything from today, bundled into one file — orders, purchases, and the
+// money summary — so a vendor always has an offline copy of the day even if
+// something ever goes wrong with the live database.
+async function buildDailyBackup(
+  shift: ReturnType<typeof useShiftStore.getState>['shift'],
+  byMethod: Record<string, { revenue: number; purchases: number }>,
+  closingBalances: MethodBalances
+) {
+  const date = new Date().toISOString().slice(0, 10)
+  const dayStart = `${date}T00:00:00`
+  const dayEnd = `${date}T23:59:59`
+
+  const orders = await fetchOrderHistory(dayStart, dayEnd, 500)
+
+  const dayStartMs = new Date(dayStart).getTime()
+  const dayEndMs = new Date(dayEnd).getTime()
+  const purchases = usePurchasingStore.getState().purchases.filter((p) => {
+    const t = new Date(p.createdAt).getTime()
+    return t >= dayStartMs && t <= dayEndMs
+  })
+
+  return {
+    date,
+    generatedAt: new Date().toISOString(),
+    shift: shift ? { openedBy: shift.openedBy, openedAt: shift.openedAt, opening: shift.opening, closing: closingBalances } : null,
+    revenueByMethod: byMethod,
+    orders,
+    purchases,
+  }
+}
+
+function downloadBackupJson(backup: { date: string }) {
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `restaurantos_backup_${backup.date}.json`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 function todayISO(daysAgo = 0) {

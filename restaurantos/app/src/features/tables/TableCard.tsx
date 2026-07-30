@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Users, ArrowRightLeft, Merge, SprayCan } from 'lucide-react'
+import { Users, ArrowRightLeft, Merge, SprayCan, UserPlus } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { StatusPill } from '../../shared/ui/StatusPill'
 import type { TableStatus } from '../../shared/ui/StatusPill'
@@ -35,6 +35,7 @@ export function TableCard({
   onMove,
   onMerge,
   onMarkCleaned,
+  onAssignCustomer,
   runningTotal,
 }: {
   table: RestaurantTable
@@ -42,11 +43,12 @@ export function TableCard({
   onMove?: (id: string) => void
   onMerge?: (id: string) => void
   onMarkCleaned?: (id: string) => void
+  onAssignCustomer?: (id: string) => void
   runningTotal?: number
 }) {
   const minutes = useElapsedMinutes(table.seatedAt)
   const timeTone = minutes > 90 ? 'text-status-cleaning' : minutes > 45 ? 'text-status-occupied' : 'text-status-available'
-  const showQuickActions = (table.status === 'occupied' || table.status === 'billing') && (onMove || onMerge)
+  const showQuickActions = (table.status === 'occupied' || table.status === 'billing') && (onMove || onMerge || onAssignCustomer)
   const showCleanedAction = table.status === 'needs_cleaning' && onMarkCleaned
 
   return (
@@ -102,6 +104,17 @@ export function TableCard({
               className="flex items-center gap-1 text-[11px] font-semibold text-ink/50 hover:text-ink"
             >
               <Merge size={12} /> Merge
+            </span>
+          )}
+          {onAssignCustomer && (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => { e.stopPropagation(); onAssignCustomer(table.id) }}
+              onKeyDown={(e) => e.key === 'Enter' && (e.stopPropagation(), onAssignCustomer(table.id))}
+              className="flex items-center gap-1 text-[11px] font-semibold text-ink/50 hover:text-ink"
+            >
+              <UserPlus size={12} /> Customer
             </span>
           )}
         </div>

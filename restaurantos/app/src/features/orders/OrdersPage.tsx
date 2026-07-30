@@ -7,6 +7,8 @@ import { CartPanel } from './CartPanel'
 import { useOrdersStore } from './ordersStore'
 import { useTablesStore } from '../tables/tablesStore'
 import { useShiftStore } from '../shifts/shiftStore'
+import { useCustomersStore } from '../customers/customersStore'
+import { CustomerAssignField } from '../customers/CustomerAssignField'
 import { useRepeatOrderStore } from './repeatOrderStore'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
@@ -31,17 +33,18 @@ export function OrdersPage() {
   const tablesLoading = useTablesStore((s) => s.loading)
   const initTables = useTablesStore((s) => s.init)
   const updateGuestInfo = useTablesStore((s) => s.updateGuestInfo)
+  const attachCustomer = useOrdersStore((s) => s.attachCustomer)
+  const initCustomers = useCustomersStore((s) => s.init)
   const orders = useOrdersStore((s) => s.orders)
   const initOrders = useOrdersStore((s) => s.init)
   const sendItemsToKitchen = useOrdersStore((s) => s.sendItemsToKitchen)
-  const [guestNameDraft, setGuestNameDraft] = useState('')
-  const [editingGuestName, setEditingGuestName] = useState(false)
 
   useEffect(() => {
     initMenu()
     initTables()
     initOrders()
-  }, [initMenu, initTables, initOrders])
+    initCustomers()
+  }, [initMenu, initTables, initOrders, initCustomers])
 
   // Tabs across the top: any table already in use, plus whichever table was
   // just tapped from the Floor screen (even if it's still "available" — that's
@@ -155,30 +158,30 @@ export function OrdersPage() {
           </div>
         </div>
 
-        {/* Guest name + elapsed time for this table */}
-        <div className="px-4 md:px-6 pb-3 flex items-center gap-2 text-sm">
-          {editingGuestName ? (
-            <input
-              autoFocus
-              value={guestNameDraft}
-              onChange={(e) => setGuestNameDraft(e.target.value)}
-              onBlur={() => { updateGuestInfo(activeTable, guestNameDraft.trim()); setEditingGuestName(false) }}
-              onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-              placeholder="Guest name"
-              className="text-sm rounded-lg border border-ink/10 px-2.5 py-1.5 outline-none focus:border-ember"
+        {/* Customer + elapsed time for this table */}
+        <div className="px-4 md:px-6 pb-3 flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 text-sm">
+            <CustomerAssignField
+              currentName={activeTableRow?.customerName}
+              currentPhone={activeTableRow?.customerPhone}
+              onAssign={(c) => {
+                updateGuestInfo(activeTable, { customerName: c.name, customerPhone: c.phone })
+                attachCustomer(activeTable, c.id)
+              }}
             />
-          ) : (
+            {activeTableRow?.seatedAt && (
+              <span className="text-ink/30 text-xs">
+                · seated {Math.max(0, Math.round((Date.now() - new Date(activeTableRow.seatedAt).getTime()) / 60000))}m ago
+              </span>
+            )}
+          </div>
+          {existingBillable.length > 0 && (
             <button
-              onClick={() => { setGuestNameDraft(activeTableRow?.customerName ?? ''); setEditingGuestName(true) }}
-              className="text-ink/50 hover:text-ink font-medium"
+              onClick={() => navigate(`/billing?table=${activeTable}`)}
+              className="text-xs font-semibold text-ember"
             >
-              {activeTableRow?.customerName ? `Guest: ${activeTableRow.customerName}` : '+ Add guest name'}
+              Go to Billing →
             </button>
-          )}
-          {activeTableRow?.seatedAt && (
-            <span className="text-ink/30 text-xs">
-              · seated {Math.max(0, Math.round((Date.now() - new Date(activeTableRow.seatedAt).getTime()) / 60000))}m ago
-            </span>
           )}
         </div>
 

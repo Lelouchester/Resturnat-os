@@ -141,6 +141,8 @@ create table restaurant_tables (
   seats integer default 4,
   status table_status not null default 'available',
   customer_name text,
+  customer_phone text,
+  customer_id uuid, -- FK to customers added below, once that table exists (customers is defined later in this file)
   guest_count integer,
   waiter_id uuid references staff(id),
   seated_at timestamptz,
@@ -255,6 +257,8 @@ create table customers (
 -- one open order at a time. Merge Bills is modeled by billing two orders'
 -- line items together at payment time rather than rewriting ownership here.
 -- ----------------------------------------------------------------------------
+alter table restaurant_tables add constraint restaurant_tables_customer_id_fkey foreign key (customer_id) references customers(id);
+
 create table orders (
   id uuid primary key default uuid_generate_v4(),
   branch_id uuid references branches(id) on delete cascade,
@@ -395,6 +399,22 @@ create table expenses (
 -- Reservations (arriving soon), and Kitchen (order_items stuck 'ready' too
 -- long). The only state worth persisting is which ones a person dismissed:
 -- ----------------------------------------------------------------------------
+-- ----------------------------------------------------------------------------
+-- Contacts — general service contacts (electrician, gas/dairy supplier,
+-- repair person, etc), separate from paying Customers and from Suppliers
+-- (which exist specifically for tracked Purchasing). Simple address-book
+-- entry, no purchase history attached.
+-- ----------------------------------------------------------------------------
+create table contacts (
+  id uuid primary key default uuid_generate_v4(),
+  branch_id uuid references branches(id) on delete cascade,
+  name text not null,
+  phone text,
+  role text, -- free text, e.g. "Electrician", "Dairy supplier"
+  notes text,
+  created_at timestamptz default now()
+);
+
 create table dismissed_notifications (
   staff_id uuid references staff(id) on delete cascade,
   notification_id text not null, -- deterministic id, e.g. 'low-stock-<inventory_item_id>'
@@ -515,6 +535,10 @@ create policy "staff can access their branch purchases" on purchases for all
 
 alter table expenses enable row level security;
 create policy "staff can access their branch expenses" on expenses for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table contacts enable row level security;
+create policy "staff can access their branch contacts" on contacts for all
   using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
 
 -- Child tables with no branch_id of their own — scoped through their parent.

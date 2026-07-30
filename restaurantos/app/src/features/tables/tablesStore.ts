@@ -19,7 +19,7 @@ interface TablesState {
   init: () => void
   seatReservation: (tableId: string, customerName: string, guestCount: number) => Promise<void>
   markArrived: (tableId: string) => Promise<void>
-  updateGuestInfo: (tableId: string, customerName: string, guestCount?: number) => Promise<void>
+  updateGuestInfo: (tableId: string, info: { customerName: string; customerPhone?: string; customerId?: string; guestCount?: number }) => Promise<void>
   markCleaned: (tableId: string) => Promise<void>
   addTable: (label: string, seats: number) => Promise<void>
 }
@@ -31,6 +31,8 @@ function mapRow(row: any): RestaurantTable {
     seats: row.seats,
     status: row.status,
     customerName: row.customer_name ?? undefined,
+    customerPhone: row.customer_phone ?? undefined,
+    customerId: row.customer_id ?? undefined,
     guestCount: row.guest_count ?? undefined,
     seatedAt: row.seated_at ?? undefined,
   }
@@ -115,9 +117,13 @@ export const useTablesStore = create<TablesState>((set, get) => ({
     if (error) console.error('[tablesStore] markArrived failed', error)
   },
 
-  updateGuestInfo: async (tableId, customerName, guestCount) => {
-    const payload: Record<string, unknown> = { customer_name: customerName || null }
-    if (guestCount !== undefined) payload.guest_count = guestCount
+  updateGuestInfo: async (tableId, info) => {
+    const payload: Record<string, unknown> = {
+      customer_name: info.customerName || null,
+      customer_phone: info.customerPhone ?? null,
+      customer_id: info.customerId ?? null,
+    }
+    if (info.guestCount !== undefined) payload.guest_count = info.guestCount
     const { error } = await supabase.from('restaurant_tables').update(payload).eq('id', tableId)
     if (error) console.error('[tablesStore] updateGuestInfo failed', error)
   },

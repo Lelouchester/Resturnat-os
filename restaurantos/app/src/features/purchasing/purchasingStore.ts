@@ -19,7 +19,7 @@ interface PurchasingState {
   loading: boolean
   initialized: boolean
   init: () => void
-  addSupplier: (name: string, phone?: string) => Promise<void>
+  addSupplier: (name: string, phone?: string) => Promise<string>
   removeSupplier: (id: string) => Promise<{ ok: boolean; error?: string }>
   createPurchase: (input: {
     supplierId?: string
@@ -113,9 +113,17 @@ export const usePurchasingStore = create<PurchasingState>((set, get) => ({
   },
 
   addSupplier: async (name, phone) => {
-    const { error } = await supabase.from('suppliers').insert({ branch_id: CURRENT_BRANCH_ID, name, phone: phone ?? null })
-    if (error) console.error('[purchasingStore] addSupplier failed', error)
+    const { data, error } = await supabase
+      .from('suppliers')
+      .insert({ branch_id: CURRENT_BRANCH_ID, name, phone: phone ?? null })
+      .select()
+      .single()
+    if (error || !data) {
+      console.error('[purchasingStore] addSupplier failed', error)
+      throw error
+    }
     set(await loadPurchasing())
+    return data.id
   },
 
   removeSupplier: async (id) => {

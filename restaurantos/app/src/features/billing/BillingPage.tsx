@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Printer, Share2, Search, UserPlus, X, Merge } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
@@ -38,10 +39,17 @@ export function BillingPage() {
     [orders]
   )
 
+  const [searchParams] = useSearchParams()
   const [activeTableId, setActiveTableId] = useState<string | null>(null)
   useEffect(() => {
-    if (!activeTableId && billableOrders.length > 0) setActiveTableId(billableOrders[0].tableId)
-  }, [activeTableId, billableOrders])
+    if (activeTableId) return
+    const fromUrl = searchParams.get('table')
+    if (fromUrl && billableOrders.some((o) => o.tableId === fromUrl)) {
+      setActiveTableId(fromUrl)
+    } else if (billableOrders.length > 0) {
+      setActiveTableId(billableOrders[0].tableId)
+    }
+  }, [activeTableId, billableOrders, searchParams])
 
   const order = billableOrders.find((o) => o.tableId === activeTableId)
   // Other tables whose bills have been merged into this one (via the Floor
@@ -55,9 +63,12 @@ export function BillingPage() {
     return [...order.items, ...mergedInOrders.flatMap((o) => o.items)].filter((i) => i.status !== 'void')
   }, [order, mergedInOrders])
 
+  const defaultTaxPct = useSettingsStore((s) => s.defaultTaxPct)
+  const defaultServiceChargePct = useSettingsStore((s) => s.defaultServiceChargePct)
+
   const [discountPct, setDiscountPct] = useState(0)
-  const [serviceChargePct, setServiceChargePct] = useState(10)
-  const [taxPct, setTaxPct] = useState(13)
+  const [serviceChargePct, setServiceChargePct] = useState(defaultServiceChargePct)
+  const [taxPct, setTaxPct] = useState(defaultTaxPct)
   const [tip, setTip] = useState(0)
   const [amounts, setAmounts] = useState<Record<string, number>>({})
   const [splitGuests, setSplitGuests] = useState(1)
@@ -118,8 +129,20 @@ export function BillingPage() {
     setAmounts({})
     setSplitGuests(1)
     setCustomerId(null)
+    setDiscountPct(0)
+    setServiceChargePct(defaultServiceChargePct)
+    setTaxPct(defaultTaxPct)
     beginBilling(tableId)
   }
+
+  // Settings load asynchronously — if Billing mounts before that finishes,
+  // the fields above start on a placeholder default. This catches the
+  // moment the real saved values arrive and syncs them in.
+  useEffect(() => {
+    setServiceChargePct(defaultServiceChargePct)
+    setTaxPct(defaultTaxPct)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultServiceChargePct, defaultTaxPct])
 
   async function quickAddWalkIn() {
     const id = await addCustomer(customerSearch.trim() || undefined, undefined)
