@@ -20,7 +20,7 @@ export function TicketCard({
   onPrint,
 }: {
   ticket: KitchenTicket
-  onMarkItem: (itemId: string) => void
+  onMarkItem: (itemId: string, isCurrentlyServed: boolean) => void
   onPrint: (ticket: KitchenTicket) => void
 }) {
   const minutes = useElapsedMinutes(ticket.firedAt)
@@ -62,9 +62,8 @@ export function TicketCard({
           return (
             <li key={item.id}>
               <button
-                onClick={() => !done && onMarkItem(item.id)}
-                disabled={done}
-                className={`w-full flex items-start gap-2.5 text-left py-1.5 rounded-lg px-1 -mx-1 ${done ? '' : 'hover:bg-ink/5'}`}
+                onClick={() => onMarkItem(item.id, done)}
+                className={`w-full flex items-start gap-2.5 text-left py-1.5 rounded-lg px-1 -mx-1 hover:bg-ink/5`}
               >
                 <span
                   className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center ${
@@ -89,7 +88,7 @@ export function TicketCard({
         })}
       </ul>
 
-      <p className="mt-2.5 text-[11px] text-ink/35">Tap an item once it's plated and served.</p>
+      <p className="mt-2.5 text-[11px] text-ink/35">Tap once it's served — tap again to undo.</p>
     </Card>
   )
 }

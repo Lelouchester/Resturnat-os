@@ -49,7 +49,7 @@ export function KitchenPage() {
               <TicketCard
                 key={t.orderId}
                 ticket={t}
-                onMarkItem={(itemId) => updateItemStatus(itemId, 'served')}
+                onMarkItem={(itemId, isCurrentlyServed) => updateItemStatus(itemId, isCurrentlyServed ? 'pending' : 'served')}
                 onPrint={setPrintingTicket}
               />
             ))}

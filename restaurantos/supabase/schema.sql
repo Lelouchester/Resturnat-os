@@ -148,6 +148,7 @@ create table restaurant_tables (
   seated_at timestamptz,
   position_x integer, -- for the floor-plan grid layout
   position_y integer,
+  is_archived boolean not null default false, -- "deleted" tables are archived, not hard-deleted — orders/reservations still reference them for real history
   created_at timestamptz default now()
 );
 

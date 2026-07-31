@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Users, ArrowRightLeft, Merge, SprayCan, UserPlus } from 'lucide-react'
+import { Users, ArrowRightLeft, Merge, SprayCan, UserPlus, Trash2 } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { StatusPill } from '../../shared/ui/StatusPill'
 import type { TableStatus } from '../../shared/ui/StatusPill'
@@ -36,6 +36,7 @@ export function TableCard({
   onMerge,
   onMarkCleaned,
   onAssignCustomer,
+  onRemove,
   runningTotal,
 }: {
   table: RestaurantTable
@@ -44,12 +45,14 @@ export function TableCard({
   onMerge?: (id: string) => void
   onMarkCleaned?: (id: string) => void
   onAssignCustomer?: (id: string) => void
+  onRemove?: (id: string) => void
   runningTotal?: number
 }) {
   const minutes = useElapsedMinutes(table.seatedAt)
   const timeTone = minutes > 90 ? 'text-status-cleaning' : minutes > 45 ? 'text-status-occupied' : 'text-status-available'
   const showQuickActions = (table.status === 'occupied' || table.status === 'billing') && (onMove || onMerge || onAssignCustomer)
   const showCleanedAction = table.status === 'needs_cleaning' && onMarkCleaned
+  const showRemoveAction = (table.status === 'available' || table.status === 'needs_cleaning') && onRemove
 
   return (
     <Card
@@ -62,7 +65,21 @@ export function TableCard({
     >
       <div className="flex items-start justify-between">
         <div className="font-ticket text-2xl font-bold tracking-tight">{table.label}</div>
-        <StatusPill status={table.status} />
+        <div className="flex items-center gap-1.5">
+          <StatusPill status={table.status} />
+          {showRemoveAction && (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => { e.stopPropagation(); onRemove!(table.id) }}
+              onKeyDown={(e) => e.key === 'Enter' && (e.stopPropagation(), onRemove!(table.id))}
+              className="text-ink/25 hover:text-status-cleaning"
+              title="Remove table"
+            >
+              <Trash2 size={14} />
+            </span>
+          )}
+        </div>
       </div>
 
       {table.customerName && (

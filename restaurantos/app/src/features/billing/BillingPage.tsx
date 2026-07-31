@@ -398,11 +398,14 @@ export function BillingPage() {
           </div>
           <Button
             className="mt-2"
-            disabled={paid === 0 && total > 0}
+            disabled={remaining > 0 && !customerId}
             onClick={handleCompletePayment}
           >
             {remaining > 0 ? `Mark Rs. ${remaining} as due & close` : 'Complete payment'}
           </Button>
+          {remaining > 0 && !customerId && (
+            <p className="text-xs text-status-cleaning text-center mt-1.5">Attach a customer above to mark the rest as due.</p>
+          )}
         </Card>
       </div>
 

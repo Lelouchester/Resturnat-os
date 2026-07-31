@@ -21,7 +21,8 @@ interface TablesState {
   markArrived: (tableId: string) => Promise<void>
   updateGuestInfo: (tableId: string, info: { customerName: string; customerPhone?: string; customerId?: string; guestCount?: number }) => Promise<void>
   markCleaned: (tableId: string) => Promise<void>
-  addTable: (label: string, seats: number) => Promise<void>
+  addTable: (label: string, seats: number) => Promise<{ ok: boolean; error?: string }>
+  archiveTable: (tableId: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 function mapRow(row: any): RestaurantTable {
@@ -58,6 +59,7 @@ export const useTablesStore = create<TablesState>((set, get) => ({
         .from('restaurant_tables')
         .select('*')
         .eq('branch_id', CURRENT_BRANCH_ID)
+        .eq('is_archived', false)
 
       if (error) {
         console.error('[tablesStore] failed to load tables', error)
@@ -83,8 +85,9 @@ export const useTablesStore = create<TablesState>((set, get) => ({
         { event: '*', schema: 'public', table: 'restaurant_tables', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` },
         (payload) => {
           set((state) => {
-            if (payload.eventType === 'DELETE') {
-              return { tables: state.tables.filter((t) => t.id !== (payload.old as any).id) }
+            if (payload.eventType === 'DELETE' || (payload.new as any)?.is_archived) {
+              const removedId = payload.eventType === 'DELETE' ? (payload.old as any).id : (payload.new as any).id
+              return { tables: state.tables.filter((t) => t.id !== removedId) }
             }
             const updated = mapRow(payload.new as any)
             const exists = state.tables.some((t) => t.id === updated.id)
@@ -138,9 +141,34 @@ export const useTablesStore = create<TablesState>((set, get) => ({
   },
 
   addTable: async (label, seats) => {
+    // Two tables with the same number at once is exactly the mix-up this
+    // guards against — order data, kitchen tickets, and billing all key off
+    // the label being unique among currently-active tables.
+    const duplicate = get().tables.find((t) => t.label.trim().toLowerCase() === label.trim().toLowerCase())
+    if (duplicate) {
+      return { ok: false, error: `"${label}" already exists on the floor — pick a different number or remove the old one first.` }
+    }
     const { error } = await supabase
       .from('restaurant_tables')
       .insert({ branch_id: CURRENT_BRANCH_ID, label, seats, status: 'available' })
-    if (error) console.error('[tablesStore] addTable failed', error)
+    if (error) {
+      console.error('[tablesStore] addTable failed', error)
+      return { ok: false, error: 'Something went wrong adding this table.' }
+    }
+    return { ok: true }
+  },
+
+  archiveTable: async (tableId) => {
+    const table = get().tables.find((t) => t.id === tableId)
+    if (!table) return { ok: false, error: 'Table not found.' }
+    if (table.status === 'occupied' || table.status === 'billing') {
+      return { ok: false, error: 'This table has an order in progress — clear or bill it out first.' }
+    }
+    const { error } = await supabase.from('restaurant_tables').update({ is_archived: true }).eq('id', tableId)
+    if (error) {
+      console.error('[tablesStore] archiveTable failed', error)
+      return { ok: false, error: 'Something went wrong removing this table.' }
+    }
+    return { ok: true }
   },
 }))

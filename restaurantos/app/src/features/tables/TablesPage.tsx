@@ -25,6 +25,18 @@ export function TablesPage() {
   const init = useTablesStore((s) => s.init)
   const addTable = useTablesStore((s) => s.addTable)
   const markCleaned = useTablesStore((s) => s.markCleaned)
+  const archiveTable = useTablesStore((s) => s.archiveTable)
+  const [removingId, setRemovingId] = useState<string | null>(null)
+  const [removeError, setRemoveError] = useState<string | null>(null)
+
+  async function handleRemoveTable(id: string) {
+    const result = await archiveTable(id)
+    if (!result.ok) {
+      setRemoveError(result.error ?? 'Could not remove this table.')
+      setTimeout(() => setRemoveError(null), 4000)
+    }
+    setRemovingId(null)
+  }
   const orders = useOrdersStore((s) => s.orders)
   const initOrders = useOrdersStore((s) => s.init)
   const transferOrderTable = useOrdersStore((s) => s.transferOrderTable)
@@ -132,6 +144,7 @@ export function TablesPage() {
                   onMerge={setMergingId}
                   onAssignCustomer={setAssigningCustomerId}
                   onMarkCleaned={markCleaned}
+                  onRemove={setRemovingId}
                   runningTotal={totalsByTable.get(t.id)}
                 />
               ))
@@ -160,6 +173,31 @@ export function TablesPage() {
         />
       )}
 
+      {removeError && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-status-cleaning text-white px-4 py-2.5 rounded-full text-sm font-semibold shadow-lg max-w-xs text-center">
+          {removeError}
+        </div>
+      )}
+
+      {removingId && (() => {
+        const t = tables.find((tt) => tt.id === removingId)!
+        return (
+          <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setRemovingId(null)} />
+            <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+              <h2 className="font-ticket text-lg font-bold mb-2">Remove {t.label}?</h2>
+              <p className="text-sm text-ink/50 mb-4">
+                It'll disappear from the floor plan. Past orders for this table stay in your records — nothing gets deleted.
+              </p>
+              <div className="flex gap-2">
+                <Button variant="secondary" className="flex-1" onClick={() => setRemovingId(null)}>Cancel</Button>
+                <Button variant="danger" className="flex-1" onClick={() => handleRemoveTable(removingId)}>Remove</Button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {assigningCustomerId && (() => {
         const t = tables.find((tt) => tt.id === assigningCustomerId)!
         return (
@@ -186,7 +224,7 @@ export function TablesPage() {
       })()}
 
       {addingTable && (
-        <AddTableModal onClose={() => setAddingTable(false)} onAdd={(label, seats) => { addTable(label, seats); setAddingTable(false) }} />
+        <AddTableModal onClose={() => setAddingTable(false)} onAdd={(label, seats) => addTable(label, seats)} />
       )}
     </div>
   )
@@ -282,9 +320,19 @@ function MergeModal({
   )
 }
 
-function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label: string, seats: number) => void }) {
+function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label: string, seats: number) => Promise<{ ok: boolean; error?: string }> }) {
   const [label, setLabel] = useState('')
   const [seats, setSeats] = useState('4')
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleAdd() {
+    const result = await onAdd(label.trim(), Number(seats) || 2)
+    if (!result.ok) {
+      setError(result.error ?? 'Something went wrong.')
+      return
+    }
+    onClose()
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
@@ -294,11 +342,12 @@ function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label:
           <h2 className="font-ticket text-lg font-bold">Add table</h2>
           <button onClick={onClose} className="text-ink/40"><X size={20} /></button>
         </div>
+        {error && <p className="text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2 mb-3">{error}</p>}
         <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Label</label>
         <input
           autoFocus
           value={label}
-          onChange={(e) => setLabel(e.target.value)}
+          onChange={(e) => { setLabel(e.target.value); setError(null) }}
           placeholder="e.g. Table 9, Patio 1"
           className="w-full mb-4 text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
         />
@@ -309,7 +358,7 @@ function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label:
           onChange={(e) => setSeats(e.target.value)}
           className="w-full mb-4 text-sm font-ticket border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
         />
-        <Button className="w-full" disabled={!label.trim()} onClick={() => onAdd(label.trim(), Number(seats) || 2)}>
+        <Button className="w-full" disabled={!label.trim()} onClick={handleAdd}>
           Add table
         </Button>
       </div>

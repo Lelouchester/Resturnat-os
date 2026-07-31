@@ -7,6 +7,8 @@ import { useShiftStore } from './shiftStore'
 import { useSettingsStore } from '../settings/settingsStore'
 import { useShiftLedger, fetchOrderHistory, type OrderHistoryRow } from './useShiftSales'
 import { usePurchasingStore } from '../purchasing/purchasingStore'
+import { useCustomersStore } from '../customers/customersStore'
+import { useInventoryStore } from '../inventory/inventoryStore'
 import type { MethodBalances } from './types'
 
 function useElapsedTime(since?: string) {
@@ -27,7 +29,7 @@ function useElapsedTime(since?: string) {
 }
 
 function downloadCsv(filename: string, rows: OrderHistoryRow[]) {
-  const header = ['Date/time', 'Table', 'Items', 'Subtotal', 'Discount', 'Total']
+  const header = ['Date/time', 'Table', 'Items', 'Subtotal', 'Discount', 'Total', 'Paid via']
   const lines = rows.map((r) => [
     new Date(r.closedAt).toLocaleString(),
     r.tableLabel,
@@ -35,6 +37,7 @@ function downloadCsv(filename: string, rows: OrderHistoryRow[]) {
     r.subtotal,
     r.discountAmount,
     r.total,
+    `"${r.paymentSummary.replace(/"/g, '""')}"`,
   ].join(','))
   const csv = [header.join(','), ...lines].join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
@@ -56,9 +59,11 @@ export function AccountsPage() {
 
   useEffect(() => {
     initShift()
+    useCustomersStore.getState().init()
+    useInventoryStore.getState().init()
   }, [initShift])
   const paymentMethods = useSettingsStore((s) => s.paymentMethods)
-  const { byMethod, orderCount, loading: ledgerLoading } = useShiftLedger(shift?.id, shift?.openedAt)
+  const { byMethod, orderCount, totalSalesAccrual, loading: ledgerLoading } = useShiftLedger(shift?.id, shift?.openedAt)
 
   const defaultOpening: MethodBalances = Object.fromEntries(paymentMethods.map((m) => [m.key, m.key === 'cash' ? 5000 : 0]))
   const [opening, setOpening] = useState<MethodBalances>(defaultOpening)
@@ -196,7 +201,25 @@ export function AccountsPage() {
           </Card>
 
           <Card className="p-5 mb-4">
-            <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-3">Revenue this shift</div>
+            <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-1">Total sales this shift</div>
+            <p className="text-xs text-ink/40 mb-3">Everything served today, including unpaid dues — this is what you actually sold.</p>
+            {ledgerLoading ? (
+              <div className="h-10 rounded-xl bg-ink/5 animate-pulse" />
+            ) : (
+              <div className="flex items-baseline justify-between">
+                <span className="font-ticket text-2xl font-bold">Rs. {totalSalesAccrual}</span>
+                {totalSalesAccrual > paymentMethods.reduce((s, m) => s + (byMethod[m.key]?.revenue || 0), 0) && (
+                  <span className="text-xs text-status-cleaning font-semibold">
+                    Rs. {totalSalesAccrual - paymentMethods.reduce((s, m) => s + (byMethod[m.key]?.revenue || 0), 0)} not yet collected
+                  </span>
+                )}
+              </div>
+            )}
+          </Card>
+
+          <Card className="p-5 mb-4">
+            <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-1">Cash collected this shift</div>
+            <p className="text-xs text-ink/40 mb-3">Only money actually received — dues aren't counted until they're paid.</p>
             {ledgerLoading ? (
               <div className="h-24 rounded-xl bg-ink/5 animate-pulse" />
             ) : (
@@ -336,6 +359,25 @@ async function buildDailyBackup(
     return t >= dayStartMs && t <= dayEndMs
   })
 
+  // A snapshot of who owes what as of right now — not just "changed today",
+  // since a due from last week is still real money the business is owed and
+  // belongs in a complete accounting backup.
+  const customersWithDues = useCustomersStore
+    .getState()
+    .customers.filter((c) => c.outstandingDue > 0)
+    .map((c) => ({ name: c.name ?? 'Walk-in', phone: c.phone, outstandingDue: c.outstandingDue, dueSince: c.dueSince }))
+
+  const inventoryMovementsToday = useInventoryStore
+    .getState()
+    .movements.filter((m) => {
+      const t = new Date(m.createdAt).getTime()
+      return t >= dayStartMs && t <= dayEndMs
+    })
+    .map((m) => {
+      const item = useInventoryStore.getState().items.find((i) => i.id === m.itemId)
+      return { item: item?.name ?? 'Unknown item', type: m.type, quantity: m.quantity, note: m.note, createdAt: m.createdAt }
+    })
+
   return {
     date,
     generatedAt: new Date().toISOString(),
@@ -343,6 +385,8 @@ async function buildDailyBackup(
     revenueByMethod: byMethod,
     orders,
     purchases,
+    customersWithOutstandingDues: customersWithDues,
+    inventoryMovementsToday,
   }
 }
 
@@ -475,6 +519,9 @@ function HistoryRow({ row, onPrint }: { row: OrderHistoryRow; onPrint: (row: Ord
       <div className="min-w-0">
         <div className="font-semibold">{row.tableLabel} <span className="text-ink/40 font-normal text-xs">{new Date(row.closedAt).toLocaleString()}</span></div>
         <div className="text-xs text-ink/40 truncate">{row.itemsSummary}</div>
+        <div className={`text-[11px] font-semibold ${row.paymentSummary.includes('Due') ? 'text-status-cleaning' : 'text-status-available'}`}>
+          {row.paymentSummary}
+        </div>
       </div>
       <div className="flex items-center gap-2 shrink-0 ml-2">
         <span className="font-ticket font-semibold">Rs. {row.total}</span>
