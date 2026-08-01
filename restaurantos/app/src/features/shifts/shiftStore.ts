@@ -31,14 +31,21 @@ function methodIdForKey(key: string): string | undefined {
 }
 
 async function loadCurrentShift(): Promise<{ shift: ActiveShift | null; lastClosing: MethodBalances | null }> {
-  const { data: openShift, error: openError } = await supabase
+  // Fetched as a list, not .maybeSingle() — if more than one shift is ever
+  // marked 'open' at once (shouldn't happen now that startShift checks
+  // first, but this is what actually broke the whole page before: a strict
+  // single-row query throws instead of just picking one), this takes the
+  // most recently opened one instead of crashing outright.
+  const { data: openShifts, error: openError } = await supabase
     .from('shifts')
     .select('id, opened_at, staff:opened_by(name), shift_balances(payment_method_id, opening_amount, payment_methods(key))')
     .eq('branch_id', CURRENT_BRANCH_ID)
     .eq('status', 'open')
-    .maybeSingle()
+    .order('opened_at', { ascending: false })
+    .limit(1)
 
   if (openError) console.error('[shiftStore] failed to load open shift', openError)
+  const openShift = openShifts?.[0] ?? null
 
   let shift: ActiveShift | null = null
   if (openShift) {
@@ -102,6 +109,27 @@ export const useShiftStore = create<ShiftState>((set, get) => ({
   },
 
   startShift: async (opening) => {
+    // The actual bug: nothing ever checked whether a shift was already open
+    // before inserting another one. If the button ever got clicked more
+    // than once (including while it looked like nothing was happening),
+    // each click created a brand new 'open' shift — that's exactly how
+    // duplicates piled up. Checking first closes that gap for good.
+    const { data: existing, error: existingErr } = await supabase
+      .from('shifts')
+      .select('id')
+      .eq('branch_id', CURRENT_BRANCH_ID)
+      .eq('status', 'open')
+      .limit(1)
+    if (existingErr) {
+      console.error('[shiftStore] existing-shift check failed', existingErr)
+      return { ok: false, error: existingErr.message || 'Could not check for an already-open shift.' }
+    }
+    if (existing && existing.length > 0) {
+      const { shift, lastClosing } = await loadCurrentShift()
+      set({ shift, lastClosing })
+      return { ok: false, error: 'A shift is already open — refreshing to show it.' }
+    }
+
     const { data: newShift, error: shiftError } = await supabase
       .from('shifts')
       .insert({ branch_id: CURRENT_BRANCH_ID, opened_by: useAuthStore.getState().staff?.id ?? null, status: 'open' })

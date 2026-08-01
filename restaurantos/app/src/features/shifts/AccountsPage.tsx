@@ -84,6 +84,7 @@ export function AccountsPage() {
 
   const [lastBackup, setLastBackup] = useState<Awaited<ReturnType<typeof buildDailyBackup>> | null>(null)
   const [backingUp, setBackingUp] = useState(false)
+  const [startingDay, setStartingDay] = useState(false)
 
   async function handleEndShift() {
     const closingBalances: MethodBalances = {}
@@ -185,16 +186,25 @@ export function AccountsPage() {
           )}
           <Button
             className="w-full"
-            disabled={paymentMethods.length === 0}
+            disabled={paymentMethods.length === 0 || startingDay}
             onClick={async () => {
-              const result = await startShift(opening)
-              if (!result.ok) {
-                setToast(result.error ?? 'Could not start the day.')
-                setTimeout(() => setToast(null), 4000)
+              setStartingDay(true)
+              try {
+                const result = await startShift(opening)
+                if (!result.ok) {
+                  setToast(result.error ?? 'Could not start the day.')
+                  setTimeout(() => setToast(null), 4000)
+                }
+              } catch (err) {
+                console.error('[AccountsPage] startShift threw', err)
+                setToast(err instanceof Error ? err.message : 'Something went wrong starting the day.')
+                setTimeout(() => setToast(null), 5000)
+              } finally {
+                setStartingDay(false)
               }
             }}
           >
-            Start day
+            {startingDay ? 'Starting…' : 'Start day'}
           </Button>
         </Card>
       ) : (

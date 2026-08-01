@@ -79,17 +79,15 @@ export function MenuPage() {
             }`}
           >
             {c.name}
-            {activeCategory === c.id && (
-              <span
-                role="button"
-                tabIndex={0}
-                onClick={(e) => { e.stopPropagation(); setRemovingCategoryId(c.id) }}
-                onKeyDown={(e) => e.key === 'Enter' && (e.stopPropagation(), setRemovingCategoryId(c.id))}
-                className="hover:text-status-cleaning"
-              >
-                <X size={12} />
-              </span>
-            )}
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => { e.stopPropagation(); setRemovingCategoryId(c.id) }}
+              onKeyDown={(e) => e.key === 'Enter' && (e.stopPropagation(), setRemovingCategoryId(c.id))}
+              className={activeCategory === c.id ? 'hover:text-status-cleaning' : 'text-ink/30 hover:text-status-cleaning'}
+            >
+              <X size={12} />
+            </span>
           </button>
         ))}
         {!addingCategory ? (
