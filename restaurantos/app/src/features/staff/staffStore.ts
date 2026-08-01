@@ -20,6 +20,7 @@ interface StaffState {
   updateRole: (id: string, role: StaffRole) => Promise<void>
   updateName: (id: string, name: string) => Promise<void>
   toggleActive: (id: string) => Promise<void>
+  removeStaff: (id: string) => Promise<{ ok: boolean; deactivatedInstead?: boolean; error?: string }>
   setPermission: (id: string, feature: FeatureKey, allowed: boolean) => Promise<void>
 }
 
@@ -105,6 +106,28 @@ export const useStaffStore = create<StaffState>((set, get) => ({
     const { error } = await supabase.from('staff').update({ is_active: !current.isActive }).eq('id', id)
     if (error) console.error('[staffStore] toggleActive failed', error)
     set({ staff: await loadStaff() })
+  },
+
+  removeStaff: async (id) => {
+    const { error } = await supabase.from('staff').delete().eq('id', id)
+    if (error) {
+      // Foreign-key violation — this person has real order/shift/purchase
+      // history attached, which must stay intact. Deactivating keeps them
+      // out of daily use without breaking anything they're linked to.
+      if (error.code === '23503') {
+        const { error: deactivateErr } = await supabase.from('staff').update({ is_active: false }).eq('id', id)
+        if (deactivateErr) {
+          console.error('[staffStore] fallback deactivate failed', deactivateErr)
+          return { ok: false, error: 'Something went wrong removing this person.' }
+        }
+        set({ staff: await loadStaff() })
+        return { ok: true, deactivatedInstead: true }
+      }
+      console.error('[staffStore] removeStaff failed', error)
+      return { ok: false, error: 'Something went wrong removing this person.' }
+    }
+    set({ staff: await loadStaff() })
+    return { ok: true }
   },
 
   setPermission: async (id, feature, allowed) => {

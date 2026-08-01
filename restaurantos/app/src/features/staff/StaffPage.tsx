@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, X, ShieldCheck, Pencil, Check } from 'lucide-react'
+import { Plus, X, ShieldCheck, Pencil, Check, Trash2 } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
 import { useStaffStore } from './staffStore'
@@ -23,6 +23,20 @@ export function StaffPage() {
   const updateRole = useStaffStore((s) => s.updateRole)
   const updateName = useStaffStore((s) => s.updateName)
   const toggleActive = useStaffStore((s) => s.toggleActive)
+  const removeStaff = useStaffStore((s) => s.removeStaff)
+  const [removingId, setRemovingId] = useState<string | null>(null)
+  const [staffNotice, setStaffNotice] = useState<string | null>(null)
+
+  async function handleRemoveStaff(id: string) {
+    const result = await removeStaff(id)
+    if (!result.ok) {
+      setStaffNotice(result.error ?? 'Could not remove this person.')
+    } else if (result.deactivatedInstead) {
+      setStaffNotice('This person has order/shift history, so they were deactivated instead of deleted — their records stay intact.')
+    }
+    setRemovingId(null)
+    setTimeout(() => setStaffNotice(null), 5000)
+  }
 
   useEffect(() => {
     init()
@@ -170,6 +184,9 @@ export function StaffPage() {
                 >
                   {s.isActive ? 'Deactivate' : 'Reactivate'}
                 </button>
+                <button onClick={() => setRemovingId(s.id)} className="text-ink/25 hover:text-status-cleaning ml-2" title="Remove">
+                  <Trash2 size={14} />
+                </button>
               </div>
               <div className="flex items-center justify-between pt-2 border-t border-ink/5">
                 <div className="flex gap-4 text-xs text-ink/50">
@@ -191,6 +208,31 @@ export function StaffPage() {
 
       {permissionsFor && (
         <PermissionsModal staff={permissionsFor} onClose={() => setPermissionsFor(null)} />
+      )}
+
+      {removingId && (() => {
+        const s = staff.find((st) => st.id === removingId)!
+        return (
+          <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setRemovingId(null)} />
+            <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+              <h2 className="font-ticket text-lg font-bold mb-2">Remove {s.name}?</h2>
+              <p className="text-sm text-ink/50 mb-4">
+                If they've never taken an order or opened a shift, they're deleted outright. If they have real history, they'll be deactivated instead so nothing breaks.
+              </p>
+              <div className="flex gap-2">
+                <Button variant="secondary" className="flex-1" onClick={() => setRemovingId(null)}>Cancel</Button>
+                <Button variant="danger" className="flex-1" onClick={() => handleRemoveStaff(removingId)}>Remove</Button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {staffNotice && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-ink text-paper px-4 py-2.5 rounded-full text-sm font-semibold shadow-lg max-w-xs text-center">
+          {staffNotice}
+        </div>
       )}
     </div>
   )

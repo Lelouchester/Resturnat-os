@@ -15,6 +15,7 @@ interface MenuState {
   initialized: boolean
   init: () => void
   addCategory: (name: string) => Promise<void>
+  removeCategory: (id: string) => Promise<{ ok: boolean; error?: string }>
   saveItem: (data: Omit<MenuItem, 'id'> & { id?: string }) => Promise<void>
   deleteItem: (id: string) => Promise<void>
   toggleAvailability: (id: string) => Promise<void>
@@ -82,7 +83,28 @@ export const useMenuStore = create<MenuState>((set, get) => ({
     const { error } = await supabase
       .from('menu_categories')
       .insert({ branch_id: CURRENT_BRANCH_ID, name, sort_order: sortOrder })
-    if (error) console.error('[menuStore] addCategory failed', error)
+    if (error) {
+      console.error('[menuStore] addCategory failed', error)
+      return
+    }
+    // Explicit reload — this table isn't guaranteed to be covered by the
+    // realtime publication the way others are, so don't rely on that alone.
+    const { categories, items } = await loadAll()
+    set({ categories, items })
+  },
+
+  removeCategory: async (id) => {
+    // Items in this category aren't deleted — the schema sets their
+    // category_id to null (they show up as "uncategorized"), never
+    // silently disappears any menu items.
+    const { error } = await supabase.from('menu_categories').delete().eq('id', id)
+    if (error) {
+      console.error('[menuStore] removeCategory failed', error)
+      return { ok: false, error: 'Something went wrong removing this category.' }
+    }
+    const { categories, items } = await loadAll()
+    set({ categories, items })
+    return { ok: true }
   },
 
   saveItem: async (data) => {

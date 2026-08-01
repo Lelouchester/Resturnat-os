@@ -22,8 +22,8 @@ interface ShiftState {
   loading: boolean
   initialized: boolean
   init: () => void
-  startShift: (opening: MethodBalances) => Promise<void>
-  endShift: (closing: MethodBalances) => Promise<void>
+  startShift: (opening: MethodBalances) => Promise<{ ok: boolean; error?: string }>
+  endShift: (closing: MethodBalances) => Promise<{ ok: boolean; error?: string }>
 }
 
 function methodIdForKey(key: string): string | undefined {
@@ -110,7 +110,7 @@ export const useShiftStore = create<ShiftState>((set, get) => ({
 
     if (shiftError || !newShift) {
       console.error('[shiftStore] startShift failed', shiftError)
-      return
+      return { ok: false, error: shiftError?.message ?? 'Could not start the day — please try again.' }
     }
 
     const rows = Object.entries(opening)
@@ -122,16 +122,22 @@ export const useShiftStore = create<ShiftState>((set, get) => ({
 
     if (rows.length > 0) {
       const { error: balancesError } = await supabase.from('shift_balances').insert(rows)
-      if (balancesError) console.error('[shiftStore] failed to save opening balances', balancesError)
+      if (balancesError) {
+        console.error('[shiftStore] failed to save opening balances', balancesError)
+        const { shift, lastClosing } = await loadCurrentShift()
+        set({ shift, lastClosing })
+        return { ok: false, error: 'Day started, but opening balances failed to save — check Accounts and re-enter them if needed.' }
+      }
     }
 
     const { shift, lastClosing } = await loadCurrentShift()
     set({ shift, lastClosing })
+    return { ok: true }
   },
 
   endShift: async (closing) => {
     const currentShift = get().shift
-    if (!currentShift) return
+    if (!currentShift) return { ok: false, error: 'No shift is currently open.' }
 
     for (const [key, amount] of Object.entries(closing)) {
       const paymentMethodId = methodIdForKey(key)
@@ -148,8 +154,12 @@ export const useShiftStore = create<ShiftState>((set, get) => ({
       .from('shifts')
       .update({ status: 'closed', closed_at: new Date().toISOString(), closed_by: useAuthStore.getState().staff?.id ?? null })
       .eq('id', currentShift.id)
-    if (closeError) console.error('[shiftStore] endShift failed', closeError)
+    if (closeError) {
+      console.error('[shiftStore] endShift failed', closeError)
+      return { ok: false, error: closeError.message || 'Could not close the day — please try again.' }
+    }
 
     set({ shift: null, lastClosing: closing })
+    return { ok: true }
   },
 }))

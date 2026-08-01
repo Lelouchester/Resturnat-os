@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Suspense, lazy, useEffect } from 'react'
 import { useAuthStore } from './features/auth/authStore'
 import { AppShell } from './shared/ui/AppShell'
+import { ErrorBoundary } from './shared/ui/ErrorBoundary'
 import { useSettingsStore } from './features/settings/settingsStore'
 import { useShiftStore } from './features/shifts/shiftStore'
 import { useOrdersStore } from './features/orders/ordersStore'
@@ -108,9 +109,11 @@ function App() {
               <Route
                 path="/reports"
                 element={
-                  <Suspense fallback={<div className="p-6 text-sm text-ink/40">Loading reports…</div>}>
-                    <ReportsPage />
-                  </Suspense>
+                  <ErrorBoundary label="Reports">
+                    <Suspense fallback={<div className="p-6 text-sm text-ink/40">Loading reports…</div>}>
+                      <ReportsPage />
+                    </Suspense>
+                  </ErrorBoundary>
                 }
               />
               <Route path="/staff" element={<StaffPage />} />

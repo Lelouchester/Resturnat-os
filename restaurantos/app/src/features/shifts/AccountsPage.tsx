@@ -95,7 +95,12 @@ export function AccountsPage() {
     setBackingUp(false)
     setLastBackup(backup)
 
-    endShift(closingBalances)
+    const result = await endShift(closingBalances)
+    if (!result.ok) {
+      setToast(result.error ?? 'Could not close the day — please try again.')
+      setTimeout(() => setToast(null), 4000)
+      return
+    }
     setOpening(closingBalances)
     setClosingState(false)
     setCounted({})
@@ -178,7 +183,17 @@ export function AccountsPage() {
               ))}
             </div>
           )}
-          <Button className="w-full" disabled={paymentMethods.length === 0} onClick={() => startShift(opening)}>
+          <Button
+            className="w-full"
+            disabled={paymentMethods.length === 0}
+            onClick={async () => {
+              const result = await startShift(opening)
+              if (!result.ok) {
+                setToast(result.error ?? 'Could not start the day.')
+                setTimeout(() => setToast(null), 4000)
+              }
+            }}
+          >
             Start day
           </Button>
         </Card>

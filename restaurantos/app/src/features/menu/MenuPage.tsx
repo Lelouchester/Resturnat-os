@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Plus, Pencil, Trash2, Star } from 'lucide-react'
+import { Plus, Pencil, Trash2, Star, X } from 'lucide-react'
+import { Button } from '../../shared/ui/Button'
 import { useMenuStore } from './menuStore'
 import { ItemFormModal } from './ItemFormModal'
 import type { MenuItem } from './types'
@@ -10,6 +11,7 @@ export function MenuPage() {
   const loading = useMenuStore((s) => s.loading)
   const init = useMenuStore((s) => s.init)
   const addCategory = useMenuStore((s) => s.addCategory)
+  const removeCategory = useMenuStore((s) => s.removeCategory)
   const saveItem = useMenuStore((s) => s.saveItem)
   const deleteItem = useMenuStore((s) => s.deleteItem)
   const toggleAvailability = useMenuStore((s) => s.toggleAvailability)
@@ -22,6 +24,18 @@ export function MenuPage() {
   const [editingItem, setEditingItem] = useState<MenuItem | 'new' | null>(null)
   const [addingCategory, setAddingCategory] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState('')
+  const [removingCategoryId, setRemovingCategoryId] = useState<string | null>(null)
+  const [categoryError, setCategoryError] = useState<string | null>(null)
+
+  async function handleRemoveCategory(id: string) {
+    const result = await removeCategory(id)
+    if (!result.ok) {
+      setCategoryError(result.error ?? 'Could not remove this category.')
+      setTimeout(() => setCategoryError(null), 4000)
+    }
+    setRemovingCategoryId(null)
+    if (activeCategory === id) setActiveCategory('all')
+  }
 
   const visibleItems = activeCategory === 'all' ? items : items.filter((i) => i.categoryId === activeCategory)
 
@@ -60,11 +74,22 @@ export function MenuPage() {
           <button
             key={c.id}
             onClick={() => setActiveCategory(c.id)}
-            className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold border transition-colors ${
+            className={`shrink-0 flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold border transition-colors ${
               activeCategory === c.id ? 'bg-ink text-paper border-ink' : 'bg-surface text-ink/60 border-ink/10'
             }`}
           >
             {c.name}
+            {activeCategory === c.id && (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); setRemovingCategoryId(c.id) }}
+                onKeyDown={(e) => e.key === 'Enter' && (e.stopPropagation(), setRemovingCategoryId(c.id))}
+                className="hover:text-status-cleaning"
+              >
+                <X size={12} />
+              </span>
+            )}
           </button>
         ))}
         {!addingCategory ? (
@@ -156,6 +181,34 @@ export function MenuPage() {
           onSave={(data) => { saveItem(data); setEditingItem(null) }}
           onClose={() => setEditingItem(null)}
         />
+      )}
+
+      {removingCategoryId && (() => {
+        const cat = categories.find((c) => c.id === removingCategoryId)!
+        const affectedCount = items.filter((i) => i.categoryId === removingCategoryId).length
+        return (
+          <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setRemovingCategoryId(null)} />
+            <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+              <h2 className="font-ticket text-lg font-bold mb-2">Remove "{cat.name}"?</h2>
+              <p className="text-sm text-ink/50 mb-4">
+                {affectedCount > 0
+                  ? `${affectedCount} item${affectedCount === 1 ? '' : 's'} in this category won't be deleted — they'll just show as uncategorized.`
+                  : 'No items are in this category right now.'}
+              </p>
+              <div className="flex gap-2">
+                <Button variant="secondary" className="flex-1" onClick={() => setRemovingCategoryId(null)}>Cancel</Button>
+                <Button variant="danger" className="flex-1" onClick={() => handleRemoveCategory(removingCategoryId)}>Remove</Button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {categoryError && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-status-cleaning text-white px-4 py-2.5 rounded-full text-sm font-semibold shadow-lg">
+          {categoryError}
+        </div>
       )}
     </div>
   )
