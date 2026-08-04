@@ -9,6 +9,7 @@ import { useShiftLedger, fetchOrderHistory, type OrderHistoryRow } from './useSh
 import { usePurchasingStore } from '../purchasing/purchasingStore'
 import { useCustomersStore } from '../customers/customersStore'
 import { useInventoryStore } from '../inventory/inventoryStore'
+import { useOrdersStore } from '../orders/ordersStore'
 import type { MethodBalances } from './types'
 
 function useElapsedTime(since?: string) {
@@ -28,19 +29,29 @@ function useElapsedTime(since?: string) {
   return label
 }
 
+// Wraps a field in quotes and escapes any internal quotes — applied to every
+// field, not just the ones we expect to contain commas, so nothing can ever
+// silently shift columns regardless of what ends up in item names or notes.
+function csvField(value: string | number): string {
+  const str = String(value)
+  return `"${str.replace(/"/g, '""')}"`
+}
+
 function downloadCsv(filename: string, rows: OrderHistoryRow[]) {
-  const header = ['Date/time', 'Table', 'Items', 'Subtotal', 'Discount', 'Total', 'Paid via']
-  const lines = rows.map((r) => [
-    new Date(r.closedAt).toLocaleString(),
-    r.tableLabel,
-    `"${r.itemsSummary.replace(/"/g, '""')}"`,
-    r.subtotal,
-    r.discountAmount,
-    r.total,
-    `"${r.paymentSummary.replace(/"/g, '""')}"`,
-  ].join(','))
-  const csv = [header.join(','), ...lines].join('\n')
-  const blob = new Blob([csv], { type: 'text/csv' })
+  const header = ['Date/time', 'Table', 'Items', 'Subtotal', 'Discount', 'Total', 'Paid via'].map(csvField)
+  const lines = rows.map((r) =>
+    [
+      csvField(new Date(r.closedAt).toLocaleString()),
+      csvField(r.tableLabel),
+      csvField(r.itemsSummary),
+      csvField(r.subtotal),
+      csvField(r.discountAmount),
+      csvField(r.total),
+      csvField(r.paymentSummary),
+    ].join(',')
+  )
+  const csv = [header.join(','), ...lines].join('\r\n')
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -63,6 +74,7 @@ export function AccountsPage() {
     useInventoryStore.getState().init()
   }, [initShift])
   const paymentMethods = useSettingsStore((s) => s.paymentMethods)
+  const openOrdersCount = useOrdersStore((s) => s.orders.length)
   const { byMethod, orderCount, totalSalesAccrual, loading: ledgerLoading } = useShiftLedger(shift?.id, shift?.openedAt)
 
   const defaultOpening: MethodBalances = Object.fromEntries(paymentMethods.map((m) => [m.key, m.key === 'cash' ? 5000 : 0]))
@@ -292,9 +304,21 @@ export function AccountsPage() {
           </Card>
 
           {!closing ? (
-            <Button variant="danger" className="w-full flex items-center justify-center gap-2 mb-4" onClick={() => setClosingState(true)}>
-              <StopCircle size={16} /> End day
-            </Button>
+            <>
+              <Button
+                variant="danger"
+                className="w-full flex items-center justify-center gap-2 mb-2"
+                disabled={openOrdersCount > 0}
+                onClick={() => setClosingState(true)}
+              >
+                <StopCircle size={16} /> End day
+              </Button>
+              {openOrdersCount > 0 && (
+                <p className="text-xs text-status-cleaning text-center mb-4">
+                  {openOrdersCount} table{openOrdersCount === 1 ? '' : 's'} still {openOrdersCount === 1 ? 'has an' : 'have'} open order{openOrdersCount === 1 ? '' : 's'} — bill {openOrdersCount === 1 ? 'it' : 'them all'} out first.
+                </p>
+              )}
+            </>
           ) : (
             <Card className="p-5 mb-4">
               <div className="font-semibold mb-1">Count everything</div>

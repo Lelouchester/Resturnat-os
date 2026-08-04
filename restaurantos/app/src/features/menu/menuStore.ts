@@ -16,8 +16,9 @@ interface MenuState {
   init: () => void
   addCategory: (name: string) => Promise<void>
   removeCategory: (id: string) => Promise<{ ok: boolean; error?: string }>
+  toggleCategoryDiscountExempt: (id: string) => Promise<void>
   saveItem: (data: Omit<MenuItem, 'id'> & { id?: string }) => Promise<void>
-  deleteItem: (id: string) => Promise<void>
+  deleteItem: (id: string) => Promise<{ ok: boolean; deactivatedInstead?: boolean; error?: string }>
   toggleAvailability: (id: string) => Promise<void>
 }
 
@@ -41,13 +42,13 @@ const ITEM_SELECT = '*, combo_components:menu_item_combo_components!combo_item_i
 
 async function loadAll() {
   const [{ data: categories, error: catError }, { data: items, error: itemError }] = await Promise.all([
-    supabase.from('menu_categories').select('id, name').eq('branch_id', CURRENT_BRANCH_ID).order('sort_order'),
+    supabase.from('menu_categories').select('id, name, exclude_from_discount').eq('branch_id', CURRENT_BRANCH_ID).order('sort_order'),
     supabase.from('menu_items').select(ITEM_SELECT).eq('branch_id', CURRENT_BRANCH_ID).order('sort_order'),
   ])
   if (catError) console.error('[menuStore] failed to load categories', catError)
   if (itemError) console.error('[menuStore] failed to load items', itemError)
   return {
-    categories: (categories ?? []) as MenuCategory[],
+    categories: (categories ?? []).map((c: any) => ({ id: c.id, name: c.name, excludeFromDiscount: c.exclude_from_discount ?? false })),
     items: (items ?? []).map(mapItemRow),
   }
 }
@@ -107,6 +108,18 @@ export const useMenuStore = create<MenuState>((set, get) => ({
     return { ok: true }
   },
 
+  toggleCategoryDiscountExempt: async (id) => {
+    const category = get().categories.find((c) => c.id === id)
+    if (!category) return
+    const { error } = await supabase
+      .from('menu_categories')
+      .update({ exclude_from_discount: !category.excludeFromDiscount })
+      .eq('id', id)
+    if (error) console.error('[menuStore] toggleCategoryDiscountExempt failed', error)
+    const { categories, items } = await loadAll()
+    set({ categories, items })
+  },
+
   saveItem: async (data) => {
     const payload = {
       branch_id: CURRENT_BRANCH_ID,
@@ -152,7 +165,25 @@ export const useMenuStore = create<MenuState>((set, get) => ({
 
   deleteItem: async (id) => {
     const { error } = await supabase.from('menu_items').delete().eq('id', id)
-    if (error) console.error('[menuStore] deleteItem failed', error)
+    if (error) {
+      // Real order history references this item — hard-deleting it would
+      // break past receipts/reports. Hide it from ordering instead.
+      if (error.code === '23503') {
+        const { error: hideErr } = await supabase.from('menu_items').update({ is_available: false }).eq('id', id)
+        if (hideErr) {
+          console.error('[menuStore] fallback deactivate failed', hideErr)
+          return { ok: false, error: 'Something went wrong removing this item.' }
+        }
+        const { categories, items } = await loadAll()
+        set({ categories, items })
+        return { ok: true, deactivatedInstead: true }
+      }
+      console.error('[menuStore] deleteItem failed', error)
+      return { ok: false, error: 'Something went wrong removing this item.' }
+    }
+    const { categories, items } = await loadAll()
+    set({ categories, items })
+    return { ok: true }
   },
 
   toggleAvailability: async (id) => {

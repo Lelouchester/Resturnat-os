@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Pencil, Trash2, Star, X } from 'lucide-react'
+import { Plus, Pencil, Trash2, Star, Settings2 } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
 import { useMenuStore } from './menuStore'
 import { ItemFormModal } from './ItemFormModal'
@@ -12,6 +12,7 @@ export function MenuPage() {
   const init = useMenuStore((s) => s.init)
   const addCategory = useMenuStore((s) => s.addCategory)
   const removeCategory = useMenuStore((s) => s.removeCategory)
+  const toggleCategoryDiscountExempt = useMenuStore((s) => s.toggleCategoryDiscountExempt)
   const saveItem = useMenuStore((s) => s.saveItem)
   const deleteItem = useMenuStore((s) => s.deleteItem)
   const toggleAvailability = useMenuStore((s) => s.toggleAvailability)
@@ -79,14 +80,20 @@ export function MenuPage() {
             }`}
           >
             {c.name}
+            {c.excludeFromDiscount && (
+              <span className={`text-[9px] font-bold rounded-full px-1 ${activeCategory === c.id ? 'bg-paper/20' : 'bg-ink/10'}`}>
+                NO DISC.
+              </span>
+            )}
             <span
               role="button"
               tabIndex={0}
               onClick={(e) => { e.stopPropagation(); setRemovingCategoryId(c.id) }}
               onKeyDown={(e) => e.key === 'Enter' && (e.stopPropagation(), setRemovingCategoryId(c.id))}
               className={activeCategory === c.id ? 'hover:text-status-cleaning' : 'text-ink/30 hover:text-status-cleaning'}
+              title="Manage category"
             >
-              <X size={12} />
+              <Settings2 size={12} />
             </span>
           </button>
         ))}
@@ -158,7 +165,19 @@ export function MenuPage() {
                   <button onClick={() => setEditingItem(item)} className="shrink-0 text-ink/40 hover:text-ink">
                     <Pencil size={15} />
                   </button>
-                  <button onClick={() => deleteItem(item.id)} className="shrink-0 text-ink/40 hover:text-status-cleaning">
+                  <button
+                    onClick={async () => {
+                      const result = await deleteItem(item.id)
+                      if (result.deactivatedInstead) {
+                        setCategoryError('This item has order history, so it was hidden from ordering instead of deleted.')
+                        setTimeout(() => setCategoryError(null), 5000)
+                      } else if (!result.ok) {
+                        setCategoryError(result.error ?? 'Could not remove this item.')
+                        setTimeout(() => setCategoryError(null), 4000)
+                      }
+                    }}
+                    className="shrink-0 text-ink/40 hover:text-status-cleaning"
+                  >
                     <Trash2 size={15} />
                   </button>
                 </div>
@@ -188,15 +207,31 @@ export function MenuPage() {
           <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setRemovingCategoryId(null)} />
             <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
-              <h2 className="font-ticket text-lg font-bold mb-2">Remove "{cat.name}"?</h2>
-              <p className="text-sm text-ink/50 mb-4">
-                {affectedCount > 0
-                  ? `${affectedCount} item${affectedCount === 1 ? '' : 's'} in this category won't be deleted — they'll just show as uncategorized.`
-                  : 'No items are in this category right now.'}
-              </p>
-              <div className="flex gap-2">
-                <Button variant="secondary" className="flex-1" onClick={() => setRemovingCategoryId(null)}>Cancel</Button>
-                <Button variant="danger" className="flex-1" onClick={() => handleRemoveCategory(removingCategoryId)}>Remove</Button>
+              <h2 className="font-ticket text-lg font-bold mb-4">{cat.name}</h2>
+
+              <label className="flex items-center justify-between gap-3 rounded-xl border border-ink/10 px-3.5 py-3 mb-4 cursor-pointer">
+                <div>
+                  <div className="text-sm font-semibold">Never discount this category</div>
+                  <div className="text-xs text-ink/40">e.g. alcohol — excluded from Billing's discount automatically</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={cat.excludeFromDiscount ?? false}
+                  onChange={() => toggleCategoryDiscountExempt(cat.id)}
+                  className="h-5 w-5 accent-ember shrink-0"
+                />
+              </label>
+
+              <div className="border-t border-ink/5 pt-4">
+                <p className="text-xs text-ink/50 mb-3">
+                  {affectedCount > 0
+                    ? `Removing this category won't delete its ${affectedCount} item${affectedCount === 1 ? '' : 's'} — they'll just show as uncategorized.`
+                    : 'No items are in this category right now.'}
+                </p>
+                <div className="flex gap-2">
+                  <Button variant="secondary" className="flex-1" onClick={() => setRemovingCategoryId(null)}>Close</Button>
+                  <Button variant="danger" className="flex-1" onClick={() => handleRemoveCategory(removingCategoryId)}>Remove category</Button>
+                </div>
               </div>
             </div>
           </div>

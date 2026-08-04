@@ -59,7 +59,7 @@ const ORDER_SELECT = `
   subtotal, discount_amount, service_charge, tax_amount, tip_amount, total, split_guest_count,
   opened_at, closed_at,
   restaurant_tables ( label ),
-  order_items ( id, menu_item_id, custom_name, quantity, unit_price, note, status, is_complimentary, void_reason, created_at, menu_items ( name ) )
+  order_items ( id, menu_item_id, custom_name, quantity, unit_price, note, status, is_complimentary, void_reason, created_at, menu_items ( name, menu_categories ( exclude_from_discount ) ) )
 `
 
 function mapOrderRow(row: any): LiveOrder {
@@ -76,6 +76,7 @@ function mapOrderRow(row: any): LiveOrder {
       isComplimentary: it.is_complimentary ?? false,
       voidReason: it.void_reason ?? undefined,
       createdAt: it.created_at,
+      excludeFromDiscount: it.menu_items?.menu_categories?.exclude_from_discount ?? false,
     }))
     .sort((a: OrderItemRow, b: OrderItemRow) => a.createdAt.localeCompare(b.createdAt))
 

@@ -79,3 +79,16 @@ body {
   background-size: 16px 8px;
   background-repeat: repeat-x;
 }
+
+/* Print reset — thermal receipts/KOTs are the only thing that should ever
+   print. Without this, leftover body/root height and margins can make an
+   80mm printer feed extra blank paper after the actual content. */
+@media print {
+  html, body, #root {
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    background: #fff !important;
+  }
+}

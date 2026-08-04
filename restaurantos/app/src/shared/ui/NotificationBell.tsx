@@ -37,7 +37,7 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 mt-2 w-80 max-w-[85vw] bg-surface rounded-2xl shadow-xl border border-ink/5 z-50 max-h-96 overflow-y-auto">
+          <div className="absolute right-0 md:right-auto md:left-0 mt-2 w-80 max-w-[85vw] bg-surface rounded-2xl shadow-xl border border-ink/5 z-50 max-h-96 overflow-y-auto">
             <div className="flex items-center justify-between px-4 py-3 border-b border-ink/5">
               <span className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40">Notifications</span>
               <span className="text-xs text-ink/40">{notifications.length}</span>

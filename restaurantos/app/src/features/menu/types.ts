@@ -17,4 +17,5 @@ export interface MenuItem {
 export interface MenuCategory {
   id: string
   name: string
+  excludeFromDiscount?: boolean // e.g. alcohol/beer — never discounted at Billing
 }

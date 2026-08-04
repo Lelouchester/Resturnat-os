@@ -187,13 +187,25 @@ export function OrdersPage() {
 
         {/* Always-visible summary of what's already confirmed for this table — stays
             put even after the working cart empties out, so nothing looks "gone". */}
-        {existingBillable.length > 0 && (
-          <div className="mx-4 md:mx-6 mb-3 rounded-xl bg-ink/[0.03] px-3.5 py-2.5 flex items-center justify-between">
-            <div className="text-xs">
-              <span className="font-semibold">{existingBillable.length} item{existingBillable.length === 1 ? '' : 's'} confirmed</span>
-              <span className="text-ink/40"> · Rs. {existingTotal}</span>
+        {(existingBillable.length > 0 || cart.itemCount > 0) && (
+          <div className="mx-4 md:mx-6 mb-3 rounded-xl bg-ink/[0.03] px-3.5 py-2.5">
+            <div className="flex items-center justify-between">
+              <div className="text-xs">
+                {existingBillable.length > 0 && (
+                  <span className="font-semibold">{existingBillable.length} item{existingBillable.length === 1 ? '' : 's'} confirmed</span>
+                )}
+                {existingBillable.length > 0 && <span className="text-ink/40"> · Rs. {existingTotal}</span>}
+              </div>
+              {existingBillable.length > 0 && (
+                <button onClick={() => setCartOpen(true)} className="md:hidden text-xs font-semibold text-ember">View</button>
+              )}
             </div>
-            <button onClick={() => setCartOpen(true)} className="md:hidden text-xs font-semibold text-ember">View</button>
+            {cart.itemCount > 0 && (
+              <div className="text-xs text-ember font-semibold mt-0.5">+ {cart.itemCount} new (not sent yet) · Rs. {cart.subtotal}</div>
+            )}
+            {(existingBillable.length > 0 || cart.itemCount > 0) && (
+              <div className="text-sm font-bold mt-1 pt-1 border-t border-ink/10">Table total: Rs. {existingTotal + cart.subtotal}</div>
+            )}
           </div>
         )}
 

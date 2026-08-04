@@ -173,7 +173,8 @@ create table menu_categories (
   branch_id uuid references branches(id) on delete cascade,
   name text not null,
   sort_order integer default 0,
-  is_active boolean default true
+  is_active boolean default true,
+  exclude_from_discount boolean not null default false -- e.g. alcohol/beer, never discounted
 );
 
 create table menu_items (

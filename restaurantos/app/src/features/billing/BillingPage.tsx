@@ -52,6 +52,15 @@ export function BillingPage() {
   }, [activeTableId, billableOrders, searchParams])
 
   const order = billableOrders.find((o) => o.tableId === activeTableId)
+
+  // The customer may already be attached to this order from Orders or the
+  // Floor plan (via CustomerAssignField) — without this, Billing would show
+  // "no customer" and silently skip updating their spend/loyalty even
+  // though the link was already made earlier.
+  useEffect(() => {
+    setCustomerId(order?.customerId ?? null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order?.id, order?.customerId])
   // Other tables whose bills have been merged into this one (via the Floor
   // plan's Merge action, or right here) — their items fold into the total.
   const mergedInOrders = useMemo(
@@ -66,7 +75,9 @@ export function BillingPage() {
   const defaultTaxPct = useSettingsStore((s) => s.defaultTaxPct)
   const defaultServiceChargePct = useSettingsStore((s) => s.defaultServiceChargePct)
 
+  const [discountMode, setDiscountMode] = useState<'pct' | 'amount'>('pct')
   const [discountPct, setDiscountPct] = useState(0)
+  const [discountAmount, setDiscountAmount] = useState(0)
   const [serviceChargePct, setServiceChargePct] = useState(defaultServiceChargePct)
   const [taxPct, setTaxPct] = useState(defaultTaxPct)
   const [tip, setTip] = useState(0)
@@ -84,7 +95,15 @@ export function BillingPage() {
     () => effectiveLines.reduce((s, l) => s + (l.isComplimentary ? 0 : l.unitPrice * l.quantity), 0),
     [effectiveLines]
   )
-  const discount = Math.round(subtotal * (discountPct / 100))
+  // Some categories (alcohol, etc.) are marked never-discounted in Menu —
+  // the discount only ever applies against what's actually eligible.
+  const discountEligibleSubtotal = useMemo(
+    () => effectiveLines.reduce((s, l) => s + (l.isComplimentary || l.excludeFromDiscount ? 0 : l.unitPrice * l.quantity), 0),
+    [effectiveLines]
+  )
+  const hasExemptItems = effectiveLines.some((l) => l.excludeFromDiscount)
+  const discount =
+    discountMode === 'pct' ? Math.round(discountEligibleSubtotal * (discountPct / 100)) : Math.min(discountAmount, discountEligibleSubtotal)
   const afterDiscount = subtotal - discount
   const serviceCharge = Math.round(afterDiscount * (serviceChargePct / 100))
   const tax = Math.round(afterDiscount * (taxPct / 100))
@@ -130,6 +149,8 @@ export function BillingPage() {
     setSplitGuests(1)
     setCustomerId(null)
     setDiscountPct(0)
+    setDiscountAmount(0)
+    setDiscountMode('pct')
     setServiceChargePct(defaultServiceChargePct)
     setTaxPct(defaultTaxPct)
     beginBilling(tableId)
@@ -301,7 +322,47 @@ export function BillingPage() {
           </div>
 
           <div className="border-t border-ink/5 pt-3 space-y-3">
-            <AdjustRow label="Discount %" value={discountPct} onChange={setDiscountPct} />
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-sm text-ink/60">Discount</span>
+                <div className="flex items-center gap-2">
+                  <div className="flex bg-ink/5 rounded-lg p-0.5">
+                    <button
+                      onClick={() => setDiscountMode('pct')}
+                      className={`text-xs font-semibold px-2 py-0.5 rounded-md ${discountMode === 'pct' ? 'bg-surface shadow-sm' : 'text-ink/40'}`}
+                    >
+                      %
+                    </button>
+                    <button
+                      onClick={() => setDiscountMode('amount')}
+                      className={`text-xs font-semibold px-2 py-0.5 rounded-md ${discountMode === 'amount' ? 'bg-surface shadow-sm' : 'text-ink/40'}`}
+                    >
+                      Rs.
+                    </button>
+                  </div>
+                  {discountMode === 'pct' ? (
+                    <input
+                      type="number"
+                      value={discountPct || ''}
+                      placeholder="0"
+                      onChange={(e) => setDiscountPct(Number(e.target.value) || 0)}
+                      className="w-16 text-sm text-right border border-ink/10 rounded-lg px-2 py-1.5 outline-none focus:border-ember font-ticket"
+                    />
+                  ) : (
+                    <input
+                      type="number"
+                      value={discountAmount || ''}
+                      placeholder="0"
+                      onChange={(e) => setDiscountAmount(Number(e.target.value) || 0)}
+                      className="w-20 text-sm text-right border border-ink/10 rounded-lg px-2 py-1.5 outline-none focus:border-ember font-ticket"
+                    />
+                  )}
+                </div>
+              </div>
+              {hasExemptItems && (
+                <p className="text-[11px] text-ink/40">Some items here are marked never-discounted in Menu, so they're left out of this.</p>
+              )}
+            </div>
             <AdjustRow label="Service charge %" value={serviceChargePct} onChange={setServiceChargePct} />
             <AdjustRow label="Tax %" value={taxPct} onChange={setTaxPct} />
             <AdjustRow label="Tip (Rs.)" value={tip} onChange={setTip} isAmount />
@@ -496,8 +557,9 @@ function AdjustRow({ label, value, onChange, isAmount }: { label: string; value:
         {isAmount && <span className="text-xs text-ink/40 font-ticket">Rs.</span>}
         <input
           type="number"
-          value={value}
-          onChange={(e) => onChange(Number(e.target.value))}
+          value={value || ''}
+          placeholder="0"
+          onChange={(e) => onChange(Number(e.target.value) || 0)}
           className="w-20 text-sm text-right border border-ink/10 rounded-lg px-2 py-1.5 outline-none focus:border-ember font-ticket"
         />
       </div>

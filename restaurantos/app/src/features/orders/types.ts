@@ -30,6 +30,7 @@ export interface OrderItemRow {
   isComplimentary: boolean
   voidReason?: string
   createdAt: string
+  excludeFromDiscount: boolean // from the item's menu category — e.g. alcohol
 }
 
 export interface LiveOrder {
