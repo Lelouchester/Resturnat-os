@@ -12,7 +12,7 @@ import { useCustomersStore } from '../customers/customersStore'
 import type { LiveOrder } from '../orders/types'
 
 export function BillingPage() {
-  const paymentMethods = useSettingsStore((s) => s.paymentMethods)
+  const paymentMethods = useSettingsStore((s) => s.paymentMethods.filter((m) => !m.isInternal))
   const customers = useCustomersStore((s) => s.customers)
   const initCustomers = useCustomersStore((s) => s.init)
   const addCustomer = useCustomersStore((s) => s.addCustomer)

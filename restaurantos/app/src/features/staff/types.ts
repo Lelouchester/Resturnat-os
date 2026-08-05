@@ -13,6 +13,7 @@ export const FEATURES = [
   { key: 'staff', label: 'Staff management' },
   { key: 'reports', label: 'Reports' },
   { key: 'settings', label: 'Settings' },
+  { key: 'financials', label: 'Bank account, transfers & full sales history' },
 ] as const
 
 export type FeatureKey = (typeof FEATURES)[number]['key']

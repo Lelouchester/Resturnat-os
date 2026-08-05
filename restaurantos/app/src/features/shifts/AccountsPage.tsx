@@ -4,12 +4,15 @@ import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
 import { ReceiptView } from '../billing/ReceiptView'
 import { useShiftStore } from './shiftStore'
-import { useSettingsStore } from '../settings/settingsStore'
+import { useSettingsStore, type PaymentMethodConfig } from '../settings/settingsStore'
+import { useAccountsStore } from '../accounts/accountsStore'
+import { ArrowRightLeft, ShieldAlert } from 'lucide-react'
 import { useShiftLedger, fetchOrderHistory, type OrderHistoryRow } from './useShiftSales'
 import { usePurchasingStore } from '../purchasing/purchasingStore'
 import { useCustomersStore } from '../customers/customersStore'
 import { useInventoryStore } from '../inventory/inventoryStore'
 import { useOrdersStore } from '../orders/ordersStore'
+import { useAuthStore } from '../auth/authStore'
 import type { MethodBalances } from './types'
 
 function useElapsedTime(since?: string) {
@@ -73,7 +76,10 @@ export function AccountsPage() {
     useCustomersStore.getState().init()
     useInventoryStore.getState().init()
   }, [initShift])
-  const paymentMethods = useSettingsStore((s) => s.paymentMethods)
+  const allPaymentMethods = useSettingsStore((s) => s.paymentMethods)
+  const paymentMethods = useMemo(() => allPaymentMethods.filter((m) => !m.isInternal), [allPaymentMethods])
+  const internalPaymentMethods = useMemo(() => allPaymentMethods.filter((m) => m.isInternal), [allPaymentMethods])
+  const canSeeFinancials = useAuthStore((s) => s.staff?.permissions.financials ?? false)
   const openOrdersCount = useOrdersStore((s) => s.orders.length)
   const { byMethod, orderCount, totalSalesAccrual, loading: ledgerLoading } = useShiftLedger(shift?.id, shift?.openedAt)
 
@@ -362,6 +368,8 @@ export function AccountsPage() {
         </>
       )}
 
+      {canSeeFinancials && <TransfersCard paymentMethods={allPaymentMethods} internalPaymentMethods={internalPaymentMethods} />}
+
       <OrderHistoryCard onPrint={setPrintingOrder} />
 
       {toast && (
@@ -455,8 +463,207 @@ function todayISO(daysAgo = 0) {
   return d.toISOString().slice(0, 10)
 }
 
+function downloadTransfersCsv(rows: ReturnType<typeof useAccountsStore.getState>['transfers']) {
+  const header = ['Date/time', 'From', 'To', 'Amount', 'Note', 'By'].map(csvField)
+  const lines = rows.map((t) =>
+    [
+      csvField(new Date(t.createdAt).toLocaleString()),
+      csvField(t.fromLabel),
+      csvField(t.toLabel),
+      csvField(t.amount),
+      csvField(t.note ?? ''),
+      csvField(t.createdByName ?? 'Unknown'),
+    ].join(',')
+  )
+  const csv = [header.join(','), ...lines].join('\r\n')
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `transfers_${todayISO(0)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// Only shown to staff with the 'financials' permission (see the toggle in
+// Staff > Permissions). This is where Bank actually becomes usable — its
+// balance only ever moves through transferFunds() here, logged with who
+// and when in account_transfers, which the RLS policy also keeps hidden
+// from anyone without that same permission.
+function TransfersCard({
+  paymentMethods,
+  internalPaymentMethods,
+}: {
+  paymentMethods: PaymentMethodConfig[]
+  internalPaymentMethods: PaymentMethodConfig[]
+}) {
+  const balances = useAccountsStore((s) => s.balances)
+  const transfers = useAccountsStore((s) => s.transfers)
+  const transfersLoading = useAccountsStore((s) => s.transfersLoading)
+  const transferFunds = useAccountsStore((s) => s.transferFunds)
+  const init = useAccountsStore((s) => s.init)
+
+  useEffect(() => {
+    init()
+  }, [init])
+
+  const [showTransfer, setShowTransfer] = useState(false)
+  const [fromKey, setFromKey] = useState(paymentMethods[0]?.key ?? '')
+  const [toKey, setToKey] = useState(internalPaymentMethods[0]?.key ?? paymentMethods[1]?.key ?? '')
+  const [amount, setAmount] = useState('')
+  const [note, setNote] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleTransfer() {
+    setError(null)
+    const amt = Number(amount)
+    if (!amt || amt <= 0) {
+      setError('Enter an amount greater than zero.')
+      return
+    }
+    if (fromKey === toKey) {
+      setError('Pick two different accounts.')
+      return
+    }
+    setSubmitting(true)
+    const result = await transferFunds(fromKey, toKey, amt, note.trim() || undefined)
+    setSubmitting(false)
+    if (!result.ok) {
+      setError(result.error ?? 'Something went wrong with that transfer.')
+      return
+    }
+    setShowTransfer(false)
+    setAmount('')
+    setNote('')
+  }
+
+  return (
+    <>
+      <Card className="p-5 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-1.5 font-ticket text-xs font-bold uppercase tracking-wider text-ink/40">
+            <ShieldAlert size={13} /> Accounts &amp; transfers
+          </div>
+          <button
+            onClick={() => setShowTransfer(true)}
+            className="flex items-center gap-1.5 text-xs font-semibold rounded-full border border-ink/10 px-2.5 py-1.5 hover:bg-ink/5"
+          >
+            <ArrowRightLeft size={12} /> Transfer funds
+          </button>
+        </div>
+
+        <p className="text-xs text-ink/40 mb-3">Only visible to you and other staff with the "Bank account, transfers & full sales history" permission.</p>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-1">
+          {paymentMethods.map((m) => (
+            <div key={m.key} className="rounded-xl border border-ink/10 p-3">
+              <div className="text-xs text-ink/50 mb-0.5">{m.label}{m.isInternal ? ' (internal)' : ''}</div>
+              <div className="font-ticket text-lg font-bold">Rs. {(balances[m.key] ?? 0).toLocaleString()}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card className="p-5 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-1.5 font-ticket text-xs font-bold uppercase tracking-wider text-ink/40">
+            <History size={13} /> Transfer history
+          </div>
+          {transfers.length > 0 && (
+            <button
+              onClick={() => downloadTransfersCsv(transfers)}
+              className="flex items-center gap-1.5 text-xs font-semibold rounded-full border border-ink/10 px-2.5 py-1.5 hover:bg-ink/5"
+            >
+              <Download size={12} /> Export CSV
+            </button>
+          )}
+        </div>
+        {transfersLoading ? (
+          <div className="h-16 rounded-xl bg-ink/5 animate-pulse" />
+        ) : transfers.length === 0 ? (
+          <p className="text-xs text-ink/30 py-6 text-center">No transfers yet.</p>
+        ) : (
+          <div className="space-y-2 max-h-72 overflow-y-auto">
+            {transfers.map((t) => (
+              <div key={t.id} className="flex items-center justify-between text-sm border-b border-ink/5 pb-2">
+                <div>
+                  <div className="font-semibold">
+                    {t.fromLabel} <ArrowRightLeft size={11} className="inline mx-1 text-ink/30" /> {t.toLabel}
+                  </div>
+                  <div className="text-xs text-ink/40">
+                    {new Date(t.createdAt).toLocaleString()} · {t.createdByName ?? 'Unknown'}
+                    {t.note ? ` · ${t.note}` : ''}
+                  </div>
+                </div>
+                <div className="font-ticket font-bold shrink-0">Rs. {t.amount.toLocaleString()}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {showTransfer && (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowTransfer(false)} />
+          <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-ticket text-lg font-bold">Transfer funds</h2>
+              <button onClick={() => setShowTransfer(false)} className="text-ink/40"><X size={20} /></button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              <div>
+                <label className="text-xs font-semibold text-ink/50 mb-1.5 block">From</label>
+                <select value={fromKey} onChange={(e) => setFromKey(e.target.value)} className="w-full text-sm border border-ink/10 rounded-xl px-2 py-2.5 outline-none focus:border-ember bg-surface">
+                  {paymentMethods.map((m) => (
+                    <option key={m.key} value={m.key}>{m.label} (Rs. {(balances[m.key] ?? 0).toLocaleString()})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-ink/50 mb-1.5 block">To</label>
+                <select value={toKey} onChange={(e) => setToKey(e.target.value)} className="w-full text-sm border border-ink/10 rounded-xl px-2 py-2.5 outline-none focus:border-ember bg-surface">
+                  {paymentMethods.map((m) => (
+                    <option key={m.key} value={m.key}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Amount (Rs.)</label>
+            <input
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              autoFocus
+              className="w-full mb-4 text-lg font-ticket font-bold border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
+            />
+
+            <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Note (optional)</label>
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. excess cash deposit"
+              className="w-full mb-4 text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
+            />
+
+            {error && <p className="text-xs text-status-cleaning mb-3">{error}</p>}
+
+            <Button className="w-full" disabled={submitting} onClick={handleTransfer}>
+              {submitting ? 'Transferring…' : 'Confirm transfer'}
+            </Button>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 function OrderHistoryCard({ onPrint }: { onPrint: (row: OrderHistoryRow) => void }) {
-  const [from, setFrom] = useState(todayISO(0))
+  const canSeeFullHistory = useAuthStore((s) => s.staff?.permissions.financials ?? false)
+  const earliestSelectable = canSeeFullHistory ? undefined : todayISO(7)
+  const [from, setFrom] = useState(canSeeFullHistory ? todayISO(0) : todayISO(7))
   const [to, setTo] = useState(todayISO(0))
   const [rows, setRows] = useState<OrderHistoryRow[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -464,7 +671,8 @@ function OrderHistoryCard({ onPrint }: { onPrint: (row: OrderHistoryRow) => void
 
   async function search() {
     setLoading(true)
-    const data = await fetchOrderHistory(`${from}T00:00:00`, `${to}T23:59:59`)
+    const effectiveFrom = earliestSelectable && from < earliestSelectable ? earliestSelectable : from
+    const data = await fetchOrderHistory(`${effectiveFrom}T00:00:00`, `${to}T23:59:59`)
     setRows(data)
     setLoading(false)
   }
@@ -509,7 +717,7 @@ function OrderHistoryCard({ onPrint }: { onPrint: (row: OrderHistoryRow) => void
         <div className="flex items-end gap-2 flex-wrap mb-3">
           <div>
             <label className="text-xs font-semibold text-ink/50 mb-1 block">From</label>
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="text-sm border border-ink/10 rounded-lg px-2.5 py-1.5 outline-none focus:border-ember" />
+            <input type="date" value={from} min={earliestSelectable} onChange={(e) => setFrom(e.target.value)} className="text-sm border border-ink/10 rounded-lg px-2.5 py-1.5 outline-none focus:border-ember" />
           </div>
           <div>
             <label className="text-xs font-semibold text-ink/50 mb-1 block">To</label>

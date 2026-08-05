@@ -73,6 +73,7 @@ create table payment_methods (
   key text not null, -- 'cash', 'esewa', 'fonepay', or a custom slug
   label text not null,
   sort_order integer default 0,
+  is_internal boolean not null default false, -- true for accounts like "Bank" that only move money via internal transfer -- never a customer-facing payment option in Billing/Purchasing, and its balance is hidden from staff without the 'financials' permission
   unique (branch_id, key)
 );
 
@@ -95,6 +96,23 @@ create table ledger_entries (
   reason text, -- e.g. 'order payment', 'purchase payment', 'supplier payment'
   order_id uuid, -- nullable FK, set below once orders exists
   purchase_id uuid, -- nullable FK, set below once purchases exists
+  created_by uuid, -- who was signed in when this entry was made — the audit trail's "who" (FK to staff added below, once that table exists)
+  created_at timestamptz default now()
+);
+
+-- ----------------------------------------------------------------------------
+-- Internal transfers between accounts (e.g. Fonepay -> Bank, Bank -> Cash).
+-- Always created by transfer_funds() below, never written to directly —
+-- that's what actually moves the balances and logs the paired ledger_entries.
+-- ----------------------------------------------------------------------------
+create table account_transfers (
+  id uuid primary key default uuid_generate_v4(),
+  branch_id uuid references branches(id) on delete cascade,
+  from_account_id uuid references accounts(id),
+  to_account_id uuid references accounts(id),
+  amount numeric(12,2) not null,
+  note text,
+  created_by uuid, -- FK to staff added below, once that table exists
   created_at timestamptz default now()
 );
 
@@ -118,6 +136,9 @@ create table staff (
   avg_prep_minutes numeric(6,2), -- only meaningful for kitchen role
   created_at timestamptz default now()
 );
+
+alter table ledger_entries add constraint ledger_entries_created_by_fkey foreign key (created_by) references staff(id);
+alter table account_transfers add constraint account_transfers_created_by_fkey foreign key (created_by) references staff(id);
 
 -- Per-person, per-feature access — matches the toggle list on the Staff
 -- screen exactly (tables, orders, kitchen, billing, shifts, menu, inventory,
@@ -329,7 +350,7 @@ create table stock_movements (
   type stock_movement_type not null,
   quantity numeric(10,3) not null, -- signed
   note text,
-  created_by uuid references staff(id),
+  created_by uuid, -- FK to staff added below, once that table exists
   created_at timestamptz default now()
 );
 
@@ -392,7 +413,7 @@ create table expenses (
   note text,
   is_recurring boolean default false,
   attachment_url text,
-  created_by uuid references staff(id),
+  created_by uuid, -- FK to staff added below, once that table exists
   created_at timestamptz default now()
 );
 
@@ -447,6 +468,102 @@ end;
 $$;
 
 grant execute on function link_staff_account() to authenticated;
+
+-- ----------------------------------------------------------------------------
+-- Financial visibility check. True for admin/manager roles, or anyone with
+-- an explicit 'financials' permission override — same fallback logic the
+-- app's own DEFAULT_PERMISSIONS uses (an override row wins if present,
+-- otherwise it falls back to the role default). This is what gates seeing
+-- the Bank account, transfer history, and (client-side) older sales history.
+-- ----------------------------------------------------------------------------
+create or replace function current_staff_financials_ok() returns boolean
+language plpgsql stable security definer as $$
+declare
+  v_staff_id uuid;
+  v_role staff_role;
+  v_override boolean;
+begin
+  select id, role into v_staff_id, v_role from staff where auth_user_id = auth.uid() and is_active limit 1;
+  if v_staff_id is null then
+    return false;
+  end if;
+
+  select allowed into v_override from permissions where staff_id = v_staff_id and feature_key = 'financials';
+  if v_override is not null then
+    return v_override;
+  end if;
+
+  return v_role in ('admin', 'manager');
+end;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- Moves money between two accounts in the caller's own branch (e.g. Fonepay
+-- -> Bank, Bank -> Cash) in one atomic step: both balances update and both
+-- ledger_entries rows are written together, or neither happens. SECURITY
+-- DEFINER because it needs to touch accounts/ledger_entries directly, but
+-- it enforces its own checks below rather than relying on RLS — same
+-- narrow-RPC-bypassing-RLS template as link_staff_account() above.
+-- ----------------------------------------------------------------------------
+create or replace function transfer_funds(p_from_account_id uuid, p_to_account_id uuid, p_amount numeric, p_note text default null)
+returns uuid
+language plpgsql security definer as $$
+declare
+  v_staff_id uuid;
+  v_branch_id uuid;
+  v_from_branch uuid;
+  v_to_branch uuid;
+  v_from_balance numeric;
+  v_transfer_id uuid;
+begin
+  select id into v_staff_id from staff where auth_user_id = auth.uid() and is_active limit 1;
+  if v_staff_id is null then
+    raise exception 'no active staff record for caller';
+  end if;
+
+  if not current_staff_financials_ok() then
+    raise exception 'not permitted to move funds between accounts';
+  end if;
+
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'transfer amount must be greater than zero';
+  end if;
+
+  if p_from_account_id = p_to_account_id then
+    raise exception 'cannot transfer an account to itself';
+  end if;
+
+  select branch_id, balance into v_from_branch, v_from_balance from accounts where id = p_from_account_id;
+  select branch_id into v_to_branch from accounts where id = p_to_account_id;
+  v_branch_id := current_staff_branch();
+
+  if v_from_branch is null or v_to_branch is null then
+    raise exception 'account not found';
+  end if;
+  if v_from_branch <> v_branch_id or v_to_branch <> v_branch_id then
+    raise exception 'accounts must belong to your own branch';
+  end if;
+  if v_from_balance < p_amount then
+    raise exception 'insufficient balance in source account';
+  end if;
+
+  update accounts set balance = balance - p_amount where id = p_from_account_id;
+  update accounts set balance = balance + p_amount where id = p_to_account_id;
+
+  insert into account_transfers (branch_id, from_account_id, to_account_id, amount, note, created_by)
+  values (v_branch_id, p_from_account_id, p_to_account_id, p_amount, p_note, v_staff_id)
+  returning id into v_transfer_id;
+
+  insert into ledger_entries (account_id, amount, reason, created_by)
+  values
+    (p_from_account_id, -p_amount, coalesce(p_note, 'internal transfer'), v_staff_id),
+    (p_to_account_id, p_amount, coalesce(p_note, 'internal transfer'), v_staff_id);
+
+  return v_transfer_id;
+end;
+$$;
+
+grant execute on function transfer_funds(uuid, uuid, numeric, text) to authenticated;
 
 -- ============================================================================
 -- Row Level Security is intentionally left OFF in this version.

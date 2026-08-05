@@ -8,12 +8,15 @@ import { Card } from '../../shared/ui/Card'
 import { useReportsData, type ReportRange } from './useReportsData'
 import { useInventoryStore } from '../inventory/inventoryStore'
 import { useCustomersStore } from '../customers/customersStore'
+import { useAuthStore } from '../auth/authStore'
 
-const RANGES: ReportRange[] = ['Today', '7 days', '30 days']
+const ALL_RANGES: ReportRange[] = ['Today', '7 days', '30 days']
 
 export function ReportsPage() {
+  const canSeeFullHistory = useAuthStore((s) => s.staff?.permissions.financials ?? false)
+  const RANGES = canSeeFullHistory ? ALL_RANGES : (['Today', '7 days'] as ReportRange[])
   const [range, setRange] = useState<ReportRange>('7 days')
-  const { data, loading } = useReportsData(range)
+  const { data, loading } = useReportsData(canSeeFullHistory ? range : (range === '30 days' ? '7 days' : range))
 
   const inventoryItems = useInventoryStore((s) => s.items)
   const initInventory = useInventoryStore((s) => s.init)

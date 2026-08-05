@@ -6,6 +6,7 @@ export interface PaymentMethodConfig {
   id: string // real Supabase row id — used for FK references once Billing/Shifts/Purchasing write against it
   key: string
   label: string
+  isInternal?: boolean // true for accounts like "Bank" that only move via internal transfer — never a customer-facing payment option
 }
 
 export interface RestaurantSettings {
@@ -167,7 +168,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     async function load() {
       const { data, error } = await supabase
         .from('payment_methods')
-        .select('id, key, label')
+        .select('id, key, label, is_internal')
         .eq('branch_id', CURRENT_BRANCH_ID)
         .order('sort_order')
 
@@ -176,7 +177,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         set({ paymentMethodsLoading: false })
         return
       }
-      set({ paymentMethods: data ?? [], paymentMethodsLoading: false })
+      set({
+        paymentMethods: (data ?? []).map((row) => ({ id: row.id, key: row.key, label: row.label, isInternal: row.is_internal ?? false })),
+        paymentMethodsLoading: false,
+      })
     }
     load()
 
@@ -191,7 +195,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
               return { paymentMethods: state.paymentMethods.filter((m) => m.id !== (payload.old as any).id) }
             }
             const row = payload.new as any
-            const updated: PaymentMethodConfig = { id: row.id, key: row.key, label: row.label }
+            const updated: PaymentMethodConfig = { id: row.id, key: row.key, label: row.label, isInternal: row.is_internal ?? false }
             const exists = state.paymentMethods.some((m) => m.id === updated.id)
             return {
               paymentMethods: exists
