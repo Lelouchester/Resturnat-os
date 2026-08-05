@@ -1,6 +1,6 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Suspense, lazy, useEffect } from 'react'
+import { Suspense, lazy, useEffect, type ReactNode } from 'react'
 import { useAuthStore } from './features/auth/authStore'
 import { AppShell } from './shared/ui/AppShell'
 import { ErrorBoundary } from './shared/ui/ErrorBoundary'
@@ -35,6 +35,22 @@ function darken(hex: string, amount: number): string {
   if (!match) return hex
   const [r, g, b] = [match[1], match[2], match[3]].map((h) => Math.round(parseInt(h, 16) * (1 - amount)))
   return `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`
+}
+
+// A crash on one page shouldn't leave every OTHER page showing the same
+// "couldn't load" fallback until a full reload — but a single ErrorBoundary
+// instance wrapping every route never remounts when you navigate (React
+// Router just swaps the matched element underneath it), so its "something
+// broke" state would otherwise persist across the whole session. Keying it
+// by the current path forces a fresh instance — and a fresh render attempt
+// — every time you go to a different page.
+function RouteErrorBoundary({ children }: { children: ReactNode }) {
+  const location = useLocation()
+  return (
+    <ErrorBoundary key={location.pathname} label="this page">
+      {children}
+    </ErrorBoundary>
+  )
 }
 
 function App() {
@@ -95,7 +111,7 @@ function App() {
           <LoginPage />
         ) : (
           <AppShell>
-            <ErrorBoundary label="this page">
+            <RouteErrorBoundary>
             <Routes>
               <Route path="/" element={<Navigate to="/tables" replace />} />
               <Route path="/tables" element={<TablesPage />} />
@@ -121,7 +137,7 @@ function App() {
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/login" element={<LoginPage />} />
             </Routes>
-            </ErrorBoundary>
+            </RouteErrorBoundary>
           </AppShell>
         )}
       </BrowserRouter>
