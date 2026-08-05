@@ -4,6 +4,7 @@ import { Printer, Share2, Search, UserPlus, X, Merge } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
 import { ReceiptView } from './ReceiptView'
+import type { BillLine } from './types'
 import { useSettingsStore } from '../settings/settingsStore'
 import { useOrdersStore } from '../orders/ordersStore'
 import { useTablesStore } from '../tables/tablesStore'
@@ -84,6 +85,24 @@ export function BillingPage() {
   const [amounts, setAmounts] = useState<Record<string, number>>({})
   const [splitGuests, setSplitGuests] = useState(1)
   const [toast, setToast] = useState<string | null>(null)
+  // "Complete payment" immediately auto-advances the screen to the next
+  // billable table — which means the live `order`/`discount`/etc. this
+  // component was just showing no longer describe the bill that was just
+  // paid. Without this snapshot, hitting Print right after completing
+  // payment prints whatever the *next* table happens to show (or nothing,
+  // if there's no next table) instead of the receipt just closed out —
+  // this is why discounts appeared to silently vanish from printed bills.
+  const [lastReceipt, setLastReceipt] = useState<{
+    tableLabel: string
+    customerName: string
+    lines: BillLine[]
+    subtotal: number
+    discount: number
+    serviceCharge: number
+    tax: number
+    tip: number
+    total: number
+  } | null>(null)
 
   // Customer attachment — entirely optional, this is what turns a one-off
   // bill into a visit that builds someone's loyalty history.
@@ -180,6 +199,22 @@ export function BillingPage() {
 
   async function handleCompletePayment() {
     if (!order) return
+
+    // Snapshot the bill exactly as it's being paid, before anything about
+    // the screen changes — this is what "Print" prints from once payment
+    // completes, regardless of which table becomes active next.
+    setLastReceipt({
+      tableLabel: order.tableLabel,
+      customerName: selectedCustomer?.name ?? 'Walk-in',
+      lines: effectiveLines.map((l) => ({ name: l.name, quantity: l.quantity, unitPrice: l.isComplimentary ? 0 : l.unitPrice })),
+      subtotal,
+      discount,
+      serviceCharge,
+      tax,
+      tip,
+      total,
+    })
+
     await completePayment({
       orderId: order.id,
       payments: paymentMethods.map((m) => ({ methodKey: m.key, amount: amounts[m.key] || 0 })),
@@ -211,6 +246,15 @@ export function BillingPage() {
     setAmounts({})
     setSplitGuests(1)
     setCustomerId(null)
+    // Without this, a discount (or a changed tax/service %) applied to the
+    // table just paid would silently carry over and apply to whichever
+    // table gets auto-advanced to next — a real risk of over-discounting
+    // someone else's bill by accident.
+    setDiscountPct(0)
+    setDiscountAmount(0)
+    setDiscountMode('pct')
+    setServiceChargePct(defaultServiceChargePct)
+    setTaxPct(defaultTaxPct)
   }
 
   if (ordersLoading) {
@@ -219,10 +263,30 @@ export function BillingPage() {
 
   if (!order) {
     return (
-      <div className="p-6 max-w-sm mx-auto text-center pt-20">
-        <div className="font-ticket text-lg font-bold mb-2">No tables to bill</div>
-        <p className="text-sm text-ink/50">Once a table has an order, it'll show up here to close out.</p>
-      </div>
+      <>
+        <div className="p-6 max-w-sm mx-auto text-center pt-20 print:hidden">
+          <div className="font-ticket text-lg font-bold mb-2">No tables to bill</div>
+          <p className="text-sm text-ink/50 mb-5">Once a table has an order, it'll show up here to close out.</p>
+          {lastReceipt && (
+            <Button variant="secondary" className="mx-auto flex items-center justify-center gap-1.5" onClick={() => window.print()}>
+              <Printer size={15} /> Print last receipt ({lastReceipt.tableLabel})
+            </Button>
+          )}
+        </div>
+        {lastReceipt && (
+          <ReceiptView
+            tableLabel={lastReceipt.tableLabel}
+            customerName={lastReceipt.customerName}
+            lines={lastReceipt.lines}
+            subtotal={lastReceipt.subtotal}
+            discount={lastReceipt.discount}
+            serviceCharge={lastReceipt.serviceCharge}
+            tax={lastReceipt.tax}
+            tip={lastReceipt.tip}
+            total={lastReceipt.total}
+          />
+        )}
+      </>
     )
   }
 

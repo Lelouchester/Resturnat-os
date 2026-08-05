@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, AlertTriangle, History, SlidersHorizontal } from 'lucide-react'
+import { Plus, AlertTriangle, History, SlidersHorizontal, Pencil, Trash2 } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { useInventoryStore } from './inventoryStore'
 import { AdjustStockModal } from './AdjustStockModal'
+import { EditItemModal } from './EditItemModal'
 import type { InventoryItem } from './types'
 
 export function InventoryPage() {
@@ -11,6 +12,8 @@ export function InventoryPage() {
   const loading = useInventoryStore((s) => s.loading)
   const init = useInventoryStore((s) => s.init)
   const addItem = useInventoryStore((s) => s.addItem)
+  const updateItem = useInventoryStore((s) => s.updateItem)
+  const deleteItem = useInventoryStore((s) => s.deleteItem)
   const adjustStock = useInventoryStore((s) => s.adjustStock)
 
   useEffect(() => {
@@ -18,12 +21,28 @@ export function InventoryPage() {
   }, [init])
 
   const [adjusting, setAdjusting] = useState<InventoryItem | null>(null)
+  const [editing, setEditing] = useState<InventoryItem | null>(null)
+  const [removing, setRemoving] = useState<InventoryItem | null>(null)
+  const [itemError, setItemError] = useState<string | null>(null)
   const [showHistory, setShowHistory] = useState(false)
   const [addingItem, setAddingItem] = useState(false)
   const [newName, setNewName] = useState('')
   const [newUnit, setNewUnit] = useState('kg')
   const [newMin, setNewMin] = useState('10')
   const [newBarcode, setNewBarcode] = useState('')
+
+  async function handleRemove() {
+    if (!removing) return
+    const result = await deleteItem(removing.id)
+    if (result.deactivatedInstead) {
+      setItemError('This item has purchase/stock history, so it was hidden instead of deleted.')
+      setTimeout(() => setItemError(null), 5000)
+    } else if (!result.ok) {
+      setItemError(result.error ?? 'Could not remove this item.')
+      setTimeout(() => setItemError(null), 4000)
+    }
+    setRemoving(null)
+  }
 
   const lowStockItems = useMemo(() => items.filter((i) => i.currentStock <= i.minStock), [items])
 
@@ -94,9 +113,10 @@ export function InventoryPage() {
               className="text-sm border border-ink/10 rounded-xl px-2 py-2 outline-none focus:border-ember bg-surface"
             >
               <option value="kg">kg</option>
-              <option value="ltr">ltr</option>
-              <option value="pcs">pcs</option>
               <option value="g">g</option>
+              <option value="ltr">ltr</option>
+              <option value="ml">ml</option>
+              <option value="pcs">pcs</option>
             </select>
             <input
               type="number"
@@ -140,6 +160,12 @@ export function InventoryPage() {
               >
                 <SlidersHorizontal size={12} /> Adjust
               </button>
+              <button onClick={() => setEditing(item)} className="shrink-0 text-ink/40 hover:text-ink">
+                <Pencil size={15} />
+              </button>
+              <button onClick={() => setRemoving(item)} className="shrink-0 text-ink/40 hover:text-status-cleaning">
+                <Trash2 size={15} />
+              </button>
             </div>
           )
         })}
@@ -178,6 +204,46 @@ export function InventoryPage() {
           onSave={(delta, type, note) => { adjustStock(adjusting.id, delta, type, note); setAdjusting(null) }}
           onClose={() => setAdjusting(null)}
         />
+      )}
+
+      {editing && (
+        <EditItemModal
+          item={editing}
+          onSave={(updates) => { updateItem(editing.id, updates); setEditing(null) }}
+          onClose={() => setEditing(null)}
+        />
+      )}
+
+      {removing && (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setRemoving(null)} />
+          <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+            <h2 className="font-ticket text-lg font-bold mb-2">Remove {removing.name}?</h2>
+            <p className="text-xs text-ink/50 mb-4">
+              If this item has purchase or stock history, it'll be hidden instead of deleted, so that history stays intact.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setRemoving(null)}
+                className="flex-1 rounded-xl border border-ink/10 py-2.5 text-sm font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRemove}
+                className="flex-1 rounded-xl bg-status-cleaning text-white py-2.5 text-sm font-semibold"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {itemError && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-status-cleaning text-white px-4 py-2.5 rounded-full text-sm font-semibold shadow-lg">
+          {itemError}
+        </div>
       )}
     </div>
   )

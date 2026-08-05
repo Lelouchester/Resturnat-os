@@ -1,10 +1,11 @@
 export interface InventoryItem {
   id: string
   name: string
-  unit: string // 'kg', 'pcs', 'ltr', etc.
+  unit: string // 'kg', 'pcs', 'ltr', 'ml', etc.
   currentStock: number
   minStock: number
   barcode?: string
+  isArchived?: boolean
 }
 
 export type MovementType = 'purchase' | 'sale_deduction' | 'adjustment' | 'waste' | 'physical_count'

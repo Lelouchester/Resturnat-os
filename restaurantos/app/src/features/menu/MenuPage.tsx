@@ -201,7 +201,12 @@ export function MenuPage() {
       )}
 
       {removingCategoryId && (() => {
-        const cat = categories.find((c) => c.id === removingCategoryId)!
+        const cat = categories.find((c) => c.id === removingCategoryId)
+        // The category can vanish from state the instant its delete succeeds
+        // (the store reloads before this popup has a chance to close) — in
+        // that split second just render nothing instead of crashing on a
+        // missing category.
+        if (!cat) return null
         const affectedCount = items.filter((i) => i.categoryId === removingCategoryId).length
         return (
           <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">

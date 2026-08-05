@@ -95,6 +95,7 @@ function App() {
           <LoginPage />
         ) : (
           <AppShell>
+            <ErrorBoundary label="this page">
             <Routes>
               <Route path="/" element={<Navigate to="/tables" replace />} />
               <Route path="/tables" element={<TablesPage />} />
@@ -120,6 +121,7 @@ function App() {
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/login" element={<LoginPage />} />
             </Routes>
+            </ErrorBoundary>
           </AppShell>
         )}
       </BrowserRouter>

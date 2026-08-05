@@ -17,6 +17,8 @@ interface InventoryState {
   initialized: boolean
   init: () => void
   addItem: (name: string, unit: string, minStock: number, barcode?: string) => Promise<string>
+  updateItem: (itemId: string, updates: { name?: string; unit?: string; minStock?: number; barcode?: string }) => Promise<void>
+  deleteItem: (itemId: string) => Promise<{ ok: boolean; deactivatedInstead?: boolean; error?: string }>
   adjustStock: (itemId: string, delta: number, type: MovementType, note?: string) => Promise<void>
   receiveStock: (itemId: string, quantity: number, note?: string) => Promise<void>
 }
@@ -29,6 +31,7 @@ function mapItem(row: any): InventoryItem {
     currentStock: Number(row.current_stock) || 0,
     minStock: Number(row.min_stock) || 0,
     barcode: row.barcode ?? undefined,
+    isArchived: row.is_archived ?? false,
   }
 }
 
@@ -45,7 +48,7 @@ function mapMovement(row: any): StockMovement {
 
 async function loadInventory(): Promise<{ items: InventoryItem[]; movements: StockMovement[] }> {
   const [{ data: items, error: itemsErr }, { data: movements, error: movErr }] = await Promise.all([
-    supabase.from('inventory_items').select('*').eq('branch_id', CURRENT_BRANCH_ID),
+    supabase.from('inventory_items').select('*').eq('branch_id', CURRENT_BRANCH_ID).eq('is_archived', false),
     supabase
       .from('stock_movements')
       .select('*, inventory_items!inner ( branch_id )')
@@ -115,6 +118,42 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
     }
     set(await loadInventory())
     return data.id
+  },
+
+  updateItem: async (itemId, updates) => {
+    const payload: Record<string, unknown> = {}
+    if (updates.name !== undefined) payload.name = updates.name
+    if (updates.unit !== undefined) payload.unit = updates.unit
+    if (updates.minStock !== undefined) payload.min_stock = updates.minStock
+    if (updates.barcode !== undefined) payload.barcode = updates.barcode || null
+    const { error } = await supabase.from('inventory_items').update(payload).eq('id', itemId)
+    if (error) {
+      console.error('[inventoryStore] updateItem failed', error)
+      return
+    }
+    set(await loadInventory())
+  },
+
+  deleteItem: async (itemId) => {
+    const { error } = await supabase.from('inventory_items').delete().eq('id', itemId)
+    if (error) {
+      // Real purchase/stock history references this item — hard-deleting it
+      // would break past purchasing records. Archive it instead, same
+      // pattern as menu items / staff / suppliers.
+      if (error.code === '23503') {
+        const { error: archiveErr } = await supabase.from('inventory_items').update({ is_archived: true }).eq('id', itemId)
+        if (archiveErr) {
+          console.error('[inventoryStore] fallback archive failed', archiveErr)
+          return { ok: false, error: 'Something went wrong removing this item.' }
+        }
+        set(await loadInventory())
+        return { ok: true, deactivatedInstead: true }
+      }
+      console.error('[inventoryStore] deleteItem failed', error)
+      return { ok: false, error: 'Something went wrong removing this item.' }
+    }
+    set(await loadInventory())
+    return { ok: true }
   },
 
   adjustStock: async (itemId, delta, type, note) => {

@@ -319,6 +319,7 @@ create table inventory_items (
   current_stock numeric(10,3) default 0,
   min_stock numeric(10,3) default 5,
   barcode text,
+  is_archived boolean not null default false, -- "deleted" items are archived, not hard-deleted — purchase/stock history still references them for real history
   created_at timestamptz default now()
 );
 
