@@ -29,7 +29,8 @@ export function PurchasingPage() {
 
   const initAccounts = useAccountsStore((s) => s.init)
   const balances = useAccountsStore((s) => s.balances)
-  const paymentMethods = useSettingsStore((s) => s.paymentMethods.filter((m) => !m.isInternal))
+  const allPaymentMethods = useSettingsStore((s) => s.paymentMethods)
+  const paymentMethods = useMemo(() => allPaymentMethods.filter((m) => !m.isInternal), [allPaymentMethods])
 
   useEffect(() => {
     initPurchasing()
