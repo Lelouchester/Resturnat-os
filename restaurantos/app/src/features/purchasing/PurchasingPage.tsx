@@ -45,15 +45,28 @@ export function PurchasingPage() {
   const [removeError, setRemoveError] = useState<string | null>(null)
   const [historyFrom, setHistoryFrom] = useState(() => new Date().toISOString().slice(0, 10))
   const [historyTo, setHistoryTo] = useState(() => new Date().toISOString().slice(0, 10))
+  const [search, setSearch] = useState('')
 
   const purchasesInRange = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (q) {
+      // Searching looks across the whole history, not just the selected
+      // date range — the point of search is finding something you don't
+      // remember the date of.
+      return purchases.filter((p) => {
+        const supplier = suppliers.find((s) => s.id === p.supplierId)
+        const supplierMatch = supplier?.name.toLowerCase().includes(q) ?? false
+        const itemMatch = p.lines.some((l) => l.description.toLowerCase().includes(q))
+        return supplierMatch || itemMatch
+      })
+    }
     const from = new Date(`${historyFrom}T00:00:00`).getTime()
     const to = new Date(`${historyTo}T23:59:59`).getTime()
     return purchases.filter((p) => {
       const t = new Date(p.createdAt).getTime()
       return t >= from && t <= to
     })
-  }, [purchases, historyFrom, historyTo])
+  }, [purchases, suppliers, search, historyFrom, historyTo])
 
   async function handleRemoveSupplier(id: string) {
     const result = await removeSupplier(id)
@@ -167,11 +180,17 @@ export function PurchasingPage() {
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40">Purchase history</div>
         <div className="flex items-end gap-2 flex-wrap">
-          <div>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search item or supplier…"
+            className="text-xs border border-ink/10 rounded-lg px-2.5 py-1.5 outline-none focus:border-ember w-40"
+          />
+          <div className={search ? 'opacity-40 pointer-events-none' : ''}>
             <label className="text-[10px] font-semibold text-ink/40 block">From</label>
             <input type="date" value={historyFrom} onChange={(e) => setHistoryFrom(e.target.value)} className="text-xs border border-ink/10 rounded-lg px-2 py-1 outline-none focus:border-ember" />
           </div>
-          <div>
+          <div className={search ? 'opacity-40 pointer-events-none' : ''}>
             <label className="text-[10px] font-semibold text-ink/40 block">To</label>
             <input type="date" value={historyTo} onChange={(e) => setHistoryTo(e.target.value)} className="text-xs border border-ink/10 rounded-lg px-2 py-1 outline-none focus:border-ember" />
           </div>
@@ -185,9 +204,10 @@ export function PurchasingPage() {
           )}
         </div>
       </div>
+      {search && <p className="text-xs text-ink/40 mb-2">{purchasesInRange.length} result{purchasesInRange.length === 1 ? '' : 's'} across all purchases</p>}
       <div className="space-y-2">
         {purchasesInRange.length === 0 && (
-          <p className="text-sm text-ink/40 text-center py-8">No purchases in this range.</p>
+          <p className="text-sm text-ink/40 text-center py-8">{search ? 'No purchases match that search.' : 'No purchases in this range.'}</p>
         )}
         {[...purchasesInRange].reverse().map((p) => {
           const supplier = suppliers.find((s) => s.id === p.supplierId)

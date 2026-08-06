@@ -2,16 +2,19 @@ import { useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
 import type { MenuCategory, MenuItem } from './types'
+import type { InventoryItem } from '../inventory/types'
 
 export function ItemFormModal({
   categories,
   allItems,
+  inventoryItems,
   initial,
   onSave,
   onClose,
 }: {
   categories: MenuCategory[]
   allItems: MenuItem[]
+  inventoryItems: InventoryItem[]
   initial?: MenuItem
   onSave: (item: Omit<MenuItem, 'id'> & { id?: string }) => void
   onClose: () => void
@@ -31,6 +34,9 @@ export function ItemFormModal({
   const [hhStart, setHhStart] = useState(initial?.happyHour?.startTime ?? '16:00')
   const [hhEnd, setHhEnd] = useState(initial?.happyHour?.endTime ?? '18:00')
 
+  const [isTrackable, setIsTrackable] = useState(!!initial?.trackedInventoryItemId)
+  const [trackedInventoryItemId, setTrackedInventoryItemId] = useState(initial?.trackedInventoryItemId ?? inventoryItems[0]?.id ?? '')
+
   const canSave = name.trim().length > 0 && Number(price) > 0 && categoryId
 
   function toggleComboItem(id: string) {
@@ -48,6 +54,7 @@ export function ItemFormModal({
       isAvailable,
       comboItemIds: isCombo && comboItemIds.length > 0 ? comboItemIds : undefined,
       happyHour: isHappyHour && hhPrice ? { price: Number(hhPrice), startTime: hhStart, endTime: hhEnd } : undefined,
+      trackedInventoryItemId: isTrackable && trackedInventoryItemId ? trackedInventoryItemId : undefined,
     })
   }
 
@@ -169,6 +176,34 @@ export function ItemFormModal({
                     className="w-full text-sm border border-ink/10 rounded-xl px-2.5 py-2 outline-none focus:border-ember"
                   />
                 </Field>
+              </div>
+            )}
+          </div>
+
+          {/* Trackable — linked to inventory */}
+          <div className="border-t border-ink/5 pt-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium">Trackable — linked to inventory</span>
+              <Toggle checked={isTrackable} onChange={setIsTrackable} />
+            </div>
+            {isTrackable && (
+              <div>
+                <p className="text-xs text-ink/40 mb-2">
+                  Selling this item decreases the linked inventory item's stock by 1 each time — buying more of it in Purchasing increases it back. For things sold directly, like beer, liquor, or cigarettes.
+                </p>
+                {inventoryItems.length === 0 ? (
+                  <p className="text-xs text-status-cleaning">No inventory items yet — add one in Inventory first.</p>
+                ) : (
+                  <select
+                    value={trackedInventoryItemId}
+                    onChange={(e) => setTrackedInventoryItemId(e.target.value)}
+                    className="w-full text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember bg-surface"
+                  >
+                    {inventoryItems.map((i) => (
+                      <option key={i.id} value={i.id}>{i.name}</option>
+                    ))}
+                  </select>
+                )}
               </div>
             )}
           </div>

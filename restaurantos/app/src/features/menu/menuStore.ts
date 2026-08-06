@@ -32,6 +32,7 @@ function mapItemRow(row: any): MenuItem {
     isFavorite: row.is_favorite ?? false,
     isAvailable: row.is_available ?? true,
     comboItemIds: (row.combo_components ?? []).map((c: any) => c.component_item_id),
+    trackedInventoryItemId: row.tracked_inventory_item_id ?? undefined,
     happyHour: row.happy_hour_price
       ? { price: Number(row.happy_hour_price), startTime: row.happy_hour_start, endTime: row.happy_hour_end }
       : undefined,
@@ -132,6 +133,7 @@ export const useMenuStore = create<MenuState>((set, get) => ({
       happy_hour_price: data.happyHour?.price ?? null,
       happy_hour_start: data.happyHour?.startTime ?? null,
       happy_hour_end: data.happyHour?.endTime ?? null,
+      tracked_inventory_item_id: data.trackedInventoryItemId ?? null,
     }
 
     let itemId = data.id

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Plus, Pencil, Trash2, Star, Settings2 } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
 import { useMenuStore } from './menuStore'
+import { useInventoryStore } from '../inventory/inventoryStore'
 import { ItemFormModal } from './ItemFormModal'
 import type { MenuItem } from './types'
 
@@ -16,10 +17,13 @@ export function MenuPage() {
   const saveItem = useMenuStore((s) => s.saveItem)
   const deleteItem = useMenuStore((s) => s.deleteItem)
   const toggleAvailability = useMenuStore((s) => s.toggleAvailability)
+  const inventoryItems = useInventoryStore((s) => s.items)
+  const initInventory = useInventoryStore((s) => s.init)
 
   useEffect(() => {
     init()
-  }, [init])
+    initInventory()
+  }, [init, initInventory])
 
   const [activeCategory, setActiveCategory] = useState<string>('all')
   const [editingItem, setEditingItem] = useState<MenuItem | 'new' | null>(null)
@@ -152,6 +156,11 @@ export function MenuPage() {
                           HAPPY HOUR Rs. {item.happyHour.price} ({item.happyHour.startTime}–{item.happyHour.endTime})
                         </span>
                       )}
+                      {item.trackedInventoryItemId && (
+                        <span className="text-[10px] font-bold rounded-full bg-status-available-bg text-status-available px-1.5 py-0.5">
+                          TRACKED · {inventoryItems.find((i) => i.id === item.trackedInventoryItemId)?.currentStock ?? '?'} left
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="font-ticket text-sm font-bold shrink-0">Rs. {item.price}</div>
@@ -194,6 +203,7 @@ export function MenuPage() {
         <ItemFormModal
           categories={categories}
           allItems={items}
+          inventoryItems={inventoryItems}
           initial={editingItem === 'new' ? undefined : editingItem}
           onSave={(data) => { saveItem(data); setEditingItem(null) }}
           onClose={() => setEditingItem(null)}

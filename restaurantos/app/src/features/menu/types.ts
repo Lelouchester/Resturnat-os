@@ -7,6 +7,7 @@ export interface MenuItem {
   isFavorite?: boolean
   isAvailable?: boolean
   comboItemIds?: string[] // other menu items bundled into this one, at the set `price`
+  trackedInventoryItemId?: string // when set, selling this item decreases that inventory item's stock 1:1, and buying it in Purchasing increases it — for things sold directly like beer, liquor, cigarettes
   happyHour?: {
     price: number
     startTime: string // "HH:MM"

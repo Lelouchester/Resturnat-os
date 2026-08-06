@@ -45,6 +45,15 @@ export function InventoryPage() {
   }
 
   const lowStockItems = useMemo(() => items.filter((i) => i.currentStock <= i.minStock), [items])
+  const [search, setSearch] = useState('')
+  const [lowStockOnly, setLowStockOnly] = useState(false)
+  const visibleItems = useMemo(() => {
+    let list = items
+    if (lowStockOnly) list = list.filter((i) => i.currentStock <= i.minStock)
+    const q = search.trim().toLowerCase()
+    if (q) list = list.filter((i) => i.name.toLowerCase().includes(q))
+    return [...list].sort((a, b) => a.name.localeCompare(b.name))
+  }, [items, search, lowStockOnly])
 
   function handleAddItem() {
     if (!newName.trim()) return
@@ -136,8 +145,31 @@ export function InventoryPage() {
         </Card>
       )}
 
+      <div className="flex items-center gap-2 mb-3">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search inventory…"
+          className="flex-1 text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember bg-surface"
+        />
+        <button
+          onClick={() => setLowStockOnly((v) => !v)}
+          className={`shrink-0 text-xs font-semibold rounded-full px-3 py-2.5 border ${
+            lowStockOnly ? 'bg-status-cleaning text-white border-status-cleaning' : 'border-ink/10 text-ink/60'
+          }`}
+        >
+          Low stock only
+        </button>
+      </div>
+      {(search || lowStockOnly) && (
+        <p className="text-xs text-ink/40 mb-2">{visibleItems.length} of {items.length} items</p>
+      )}
+
       <div className="space-y-2">
-        {items.map((item) => {
+        {visibleItems.length === 0 && items.length > 0 && (
+          <p className="text-sm text-ink/40 text-center py-8">No items match that search.</p>
+        )}
+        {visibleItems.map((item) => {
           const low = item.currentStock <= item.minStock
           return (
             <div

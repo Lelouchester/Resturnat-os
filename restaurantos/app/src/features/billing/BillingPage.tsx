@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Printer, Share2, Search, UserPlus, X, Merge } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
 import { ReceiptView } from './ReceiptView'
@@ -10,6 +11,21 @@ import { useOrdersStore } from '../orders/ordersStore'
 import { useTablesStore } from '../tables/tablesStore'
 import { useCustomersStore } from '../customers/customersStore'
 import type { LiveOrder } from '../orders/types'
+
+function ReviewQrCard({ link, onClose }: { link: string; onClose: () => void }) {
+  return (
+    <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-surface border border-ink/10 rounded-2xl shadow-xl p-4 flex items-center gap-3 print:hidden">
+      <div className="bg-white p-1.5 rounded-xl shrink-0">
+        <QRCodeSVG value={link} size={64} />
+      </div>
+      <div className="pr-2">
+        <div className="text-sm font-semibold">Enjoyed your visit?</div>
+        <div className="text-xs text-ink/50">Scan to leave us a review</div>
+      </div>
+      <button onClick={onClose} className="text-ink/30 hover:text-ink shrink-0"><X size={16} /></button>
+    </div>
+  )
+}
 
 export function BillingPage() {
   const allPaymentMethods = useSettingsStore((s) => s.paymentMethods)
@@ -76,6 +92,7 @@ export function BillingPage() {
 
   const defaultTaxPct = useSettingsStore((s) => s.defaultTaxPct)
   const defaultServiceChargePct = useSettingsStore((s) => s.defaultServiceChargePct)
+  const googleReviewLink = useSettingsStore((s) => s.googleReviewLink)
 
   const [discountMode, setDiscountMode] = useState<'pct' | 'amount'>('pct')
   const [discountPct, setDiscountPct] = useState(0)
@@ -86,6 +103,7 @@ export function BillingPage() {
   const [amounts, setAmounts] = useState<Record<string, number>>({})
   const [splitGuests, setSplitGuests] = useState(1)
   const [toast, setToast] = useState<string | null>(null)
+  const [showReviewQr, setShowReviewQr] = useState(false)
   // "Complete payment" immediately auto-advances the screen to the next
   // billable table — which means the live `order`/`discount`/etc. this
   // component was just showing no longer describe the bill that was just
@@ -99,6 +117,7 @@ export function BillingPage() {
     lines: BillLine[]
     subtotal: number
     discount: number
+    discountPct?: number
     serviceCharge: number
     tax: number
     tip: number
@@ -207,9 +226,10 @@ export function BillingPage() {
     setLastReceipt({
       tableLabel: order.tableLabel,
       customerName: selectedCustomer?.name ?? 'Walk-in',
-      lines: effectiveLines.map((l) => ({ name: l.name, quantity: l.quantity, unitPrice: l.isComplimentary ? 0 : l.unitPrice })),
+      lines: effectiveLines.map((l) => ({ name: l.name, quantity: l.quantity, unitPrice: l.isComplimentary ? 0 : l.unitPrice, excludeFromDiscount: l.excludeFromDiscount, isComplimentary: l.isComplimentary })),
       subtotal,
       discount,
+      discountPct: discountMode === 'pct' && discountPct > 0 ? discountPct : undefined,
       serviceCharge,
       tax,
       tip,
@@ -238,6 +258,10 @@ export function BillingPage() {
 
     setToast(remaining > 0 ? 'Marked as due' : remaining < 0 ? 'Payment completed — change due' : 'Payment completed')
     setTimeout(() => setToast(null), 2500)
+    if (googleReviewLink) {
+      setShowReviewQr(true)
+      setTimeout(() => setShowReviewQr(false), 20000)
+    }
 
     // Move on to the next table waiting to be closed out, instead of
     // sitting on a bill that's already settled.
@@ -281,12 +305,14 @@ export function BillingPage() {
             lines={lastReceipt.lines}
             subtotal={lastReceipt.subtotal}
             discount={lastReceipt.discount}
+            discountPct={lastReceipt.discountPct}
             serviceCharge={lastReceipt.serviceCharge}
             tax={lastReceipt.tax}
             tip={lastReceipt.tip}
             total={lastReceipt.total}
           />
         )}
+        {showReviewQr && googleReviewLink && <ReviewQrCard link={googleReviewLink} onClose={() => setShowReviewQr(false)} />}
       </>
     )
   }
@@ -374,15 +400,32 @@ export function BillingPage() {
         <Card className="p-4">
           <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-3">Items</div>
           <div className="space-y-2 mb-4">
-            {effectiveLines.map((l) => (
-              <div key={l.id} className="flex justify-between text-sm">
-                <span>
-                  {l.quantity}× {l.name}
-                  {l.isComplimentary && <span className="ml-1.5 text-[10px] font-bold text-ember align-middle">COMP</span>}
-                </span>
-                <span className="font-ticket font-semibold">{l.isComplimentary ? 0 : l.unitPrice * l.quantity}</span>
-              </div>
-            ))}
+            {(() => {
+              const exempt = effectiveLines.filter((l) => l.excludeFromDiscount)
+              const discounted = effectiveLines.filter((l) => !l.excludeFromDiscount)
+              const showGroups = discount > 0 && exempt.length > 0 && discounted.length > 0
+
+              const row = (l: (typeof effectiveLines)[number]) => (
+                <div key={l.id} className="flex justify-between text-sm">
+                  <span>
+                    {l.quantity}× {l.name}
+                    {l.isComplimentary && <span className="ml-1.5 text-[10px] font-bold text-ember align-middle">COMP</span>}
+                  </span>
+                  <span className="font-ticket font-semibold">{l.isComplimentary ? 0 : l.unitPrice * l.quantity}</span>
+                </div>
+              )
+
+              if (!showGroups) return effectiveLines.map(row)
+
+              return (
+                <>
+                  <div className="text-[10px] font-bold uppercase text-ink/30">Discounted items</div>
+                  {discounted.map(row)}
+                  <div className="text-[10px] font-bold uppercase text-ink/30 pt-1">Not discounted</div>
+                  {exempt.map(row)}
+                </>
+              )
+            })()}
             {effectiveLines.length === 0 && <p className="text-xs text-ink/40">Nothing sent to the kitchen for this table yet.</p>}
           </div>
 
@@ -425,7 +468,9 @@ export function BillingPage() {
                 </div>
               </div>
               {hasExemptItems && (
-                <p className="text-[11px] text-ink/40">Some items here are marked never-discounted in Menu, so they're left out of this.</p>
+                <p className="text-[11px] text-ink/40">
+                  Some items here are marked never-discounted in Menu, so they're left out — this discount only applies against Rs. {discountEligibleSubtotal} of eligible items.
+                </p>
               )}
             </div>
             <AdjustRow label="Service charge %" value={serviceChargePct} onChange={setServiceChargePct} />
@@ -540,13 +585,15 @@ export function BillingPage() {
           {toast}
         </div>
       )}
+      {showReviewQr && googleReviewLink && <ReviewQrCard link={googleReviewLink} onClose={() => setShowReviewQr(false)} />}
     </div>
     <ReceiptView
       tableLabel={order.tableLabel}
       customerName={selectedCustomer?.name ?? 'Walk-in'}
-      lines={effectiveLines.map((l) => ({ name: l.name, quantity: l.quantity, unitPrice: l.isComplimentary ? 0 : l.unitPrice }))}
+      lines={effectiveLines.map((l) => ({ name: l.name, quantity: l.quantity, unitPrice: l.isComplimentary ? 0 : l.unitPrice, excludeFromDiscount: l.excludeFromDiscount, isComplimentary: l.isComplimentary }))}
       subtotal={subtotal}
       discount={discount}
+      discountPct={discountMode === 'pct' && discountPct > 0 ? discountPct : undefined}
       serviceCharge={serviceCharge}
       tax={tax}
       tip={tip}

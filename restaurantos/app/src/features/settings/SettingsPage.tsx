@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
 import { Card } from '../../shared/ui/Card'
 import { useSettingsStore } from './settingsStore'
 
@@ -94,6 +95,22 @@ export function SettingsPage() {
         <Field label="Footer message">
           <input value={settings.receiptFooter} onChange={(e) => handleChange({ receiptFooter: e.target.value })} className={inputClass} />
         </Field>
+        <Field label="Google review link" note="Paste your Google Business review link — a QR code for it will print on every receipt and show on-screen after payment, so customers can scan it right at the table.">
+          <input
+            value={settings.googleReviewLink}
+            onChange={(e) => handleChange({ googleReviewLink: e.target.value })}
+            placeholder="https://g.page/r/..."
+            className={inputClass}
+          />
+        </Field>
+        {settings.googleReviewLink && (
+          <div className="flex items-center gap-3 mt-2">
+            <div className="bg-white p-2 rounded-xl border border-ink/10">
+              <QRCodeSVG value={settings.googleReviewLink} size={72} />
+            </div>
+            <p className="text-xs text-ink/40">This is what customers will see and scan.</p>
+          </div>
+        )}
       </Section>
 
       <Section title="Payment methods" note="Add or remove what shows up in Billing, Shifts, and Purchasing — everywhere money is split or counted.">
@@ -200,11 +217,12 @@ function Section({ title, note, children }: { title: string; note?: string; chil
   )
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ label, note, children }: { label: string; note?: string; children: ReactNode }) {
   return (
     <label className="block mb-3 last:mb-0">
       <span className="text-xs font-semibold text-ink/50 mb-1.5 block">{label}</span>
       {children}
+      {note && <span className="text-[11px] text-ink/40 mt-1 block">{note}</span>}
     </label>
   )
 }

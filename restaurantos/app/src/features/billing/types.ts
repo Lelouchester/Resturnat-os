@@ -2,6 +2,8 @@ export interface BillLine {
   name: string
   quantity: number
   unitPrice: number
+  excludeFromDiscount?: boolean
+  isComplimentary?: boolean
 }
 
 export interface BillableTable {

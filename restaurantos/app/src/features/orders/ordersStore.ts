@@ -5,6 +5,8 @@ import { useAuthStore } from '../auth/authStore'
 import { useShiftStore } from '../shifts/shiftStore'
 import { useTablesStore } from '../tables/tablesStore'
 import { useAccountsStore } from '../accounts/accountsStore'
+import { useMenuStore } from '../menu/menuStore'
+import { useInventoryStore } from '../inventory/inventoryStore'
 import type { CartLine, LiveOrder, OrderItemRow, OrderItemStatus } from './types'
 
 /**
@@ -204,6 +206,20 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       console.error('[ordersStore] sendItemsToKitchen failed', error)
       return
     }
+
+    // Trackable menu items (beer, liquor, cigarettes — sold directly, not
+    // cooked) decrease inventory the moment they're committed to the
+    // order, same moment everything else in this app treats a line as
+    // "on its way." voidItem below is the mirror: it restores this if the
+    // line gets corrected afterward.
+    const menuItems = useMenuStore.getState().items
+    for (const l of billable) {
+      const menuItem = menuItems.find((m) => m.id === l.menuItemId)
+      if (menuItem?.trackedInventoryItemId) {
+        useInventoryStore.getState().adjustStock(menuItem.trackedInventoryItemId, -l.quantity, 'sale_deduction', `Sold: ${l.name}`)
+      }
+    }
+
     set({ orders: await loadOpenOrders() })
   },
 
@@ -225,11 +241,31 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
   },
 
   voidItem: async (itemId, reason) => {
+    // Need the item's menu_item_id/quantity to restore any tracked stock,
+    // and to make sure we don't restore twice if this is somehow called on
+    // an item that's already void.
+    const { data: existing, error: fetchErr } = await supabase
+      .from('order_items')
+      .select('menu_item_id, quantity, status')
+      .eq('id', itemId)
+      .maybeSingle()
+    if (fetchErr) console.error('[ordersStore] voidItem: failed to look up item before voiding', fetchErr)
+
     const { error } = await supabase
       .from('order_items')
       .update({ status: 'void', void_reason: reason, status_updated_at: new Date().toISOString() })
       .eq('id', itemId)
-    if (error) console.error('[ordersStore] voidItem failed', error)
+    if (error) {
+      console.error('[ordersStore] voidItem failed', error)
+      return
+    }
+
+    if (existing && existing.status !== 'void' && existing.menu_item_id) {
+      const menuItem = useMenuStore.getState().items.find((m) => m.id === existing.menu_item_id)
+      if (menuItem?.trackedInventoryItemId) {
+        useInventoryStore.getState().adjustStock(menuItem.trackedInventoryItemId, existing.quantity, 'sale_deduction', `Voided: ${reason}`)
+      }
+    }
   },
 
   // Marks a table (and its order) as actively being closed out — lets the

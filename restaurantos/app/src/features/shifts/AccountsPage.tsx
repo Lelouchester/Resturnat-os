@@ -518,12 +518,17 @@ function TransfersCard({
   async function handleTransfer() {
     setError(null)
     const amt = Number(amount)
+    const available = balances[fromKey] ?? 0
     if (!amt || amt <= 0) {
       setError('Enter an amount greater than zero.')
       return
     }
     if (fromKey === toKey) {
       setError('Pick two different accounts.')
+      return
+    }
+    if (amt > available) {
+      setError(`Only Rs. ${available.toLocaleString()} is actually available in that account.`)
       return
     }
     setSubmitting(true)
@@ -631,11 +636,15 @@ function TransfersCard({
               </div>
             </div>
 
-            <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Amount (Rs.)</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-semibold text-ink/50 block">Amount (Rs.)</label>
+              <span className="text-xs text-ink/40">Available: Rs. {(balances[fromKey] ?? 0).toLocaleString()}</span>
+            </div>
             <input
               type="number"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
+              max={balances[fromKey] ?? 0}
               autoFocus
               className="w-full mb-4 text-lg font-ticket font-bold border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
             />

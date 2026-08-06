@@ -56,6 +56,7 @@ create table restaurant_settings (
   default_tax_pct numeric(5,2) default 13,
   default_service_charge_pct numeric(5,2) default 10,
   receipt_footer text default 'Thank you — please visit again',
+  google_review_link text,
   table_count integer default 8,
   theme text default 'light', -- 'light' | 'dark'
   brand_color text default '#e8862e', -- overrides the ember accent app-wide, for white-labeling per cafe
@@ -215,6 +216,7 @@ create table menu_items (
   happy_hour_price numeric(10,2),
   happy_hour_start time,
   happy_hour_end time,
+  tracked_inventory_item_id uuid, -- when set, selling this item decreases that inventory item's stock 1:1 (FK added below, once inventory_items exists) — for things sold directly like beer, liquor, cigarettes
   created_at timestamptz default now()
 );
 
@@ -343,6 +345,12 @@ create table inventory_items (
   is_archived boolean not null default false, -- "deleted" items are archived, not hard-deleted — purchase/stock history still references them for real history
   created_at timestamptz default now()
 );
+
+-- Deferred: menu_items.tracked_inventory_item_id needs inventory_items to
+-- exist first. "set null" so archiving/removing an inventory item just
+-- unlinks it from the menu item rather than blocking the delete.
+alter table menu_items add constraint menu_items_tracked_inventory_item_id_fkey
+  foreign key (tracked_inventory_item_id) references inventory_items(id) on delete set null;
 
 create table stock_movements (
   id uuid primary key default uuid_generate_v4(),
