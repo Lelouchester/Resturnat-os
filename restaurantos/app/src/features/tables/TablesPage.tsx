@@ -125,46 +125,31 @@ export function TablesPage() {
             ))}
           </div>
 
-          {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-              {Array.from({ length: 8 }).map((_, i) => (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {loading ? (
+              Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="h-28 rounded-2xl bg-ink/5 animate-pulse" />
-              ))}
-            </div>
-          ) : visibleTables.length === 0 ? (
-            <p className="text-sm text-ink/40 text-center py-10">
-              No tables yet — add one, or check that Supabase is connected and seeded.
-            </p>
-          ) : (
-            <>
-              {(['table', 'cabin'] as const).map((groupType) => {
-                const group = visibleTables.filter((t) => t.type === groupType)
-                if (group.length === 0) return null
-                return (
-                  <div key={groupType} className="mb-5 last:mb-0">
-                    <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-2">
-                      {groupType === 'cabin' ? 'Cabins' : 'Tables'} · {group.length}
-                    </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                      {group.map((t) => (
-                        <TableCard
-                          key={t.id}
-                          table={t}
-                          onSelect={handleSelectTable}
-                          onMove={setTransferringId}
-                          onMerge={setMergingId}
-                          onAssignCustomer={setAssigningCustomerId}
-                          onMarkCleaned={markCleaned}
-                          onRemove={setRemovingId}
-                          runningTotal={totalsByTable.get(t.id)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-            </>
-          )}
+              ))
+            ) : visibleTables.length === 0 ? (
+              <p className="col-span-full text-sm text-ink/40 text-center py-10">
+                No tables yet — add one, or check that Supabase is connected and seeded.
+              </p>
+            ) : (
+              visibleTables.map((t) => (
+                <TableCard
+                  key={t.id}
+                  table={t}
+                  onSelect={handleSelectTable}
+                  onMove={setTransferringId}
+                  onMerge={setMergingId}
+                  onAssignCustomer={setAssigningCustomerId}
+                  onMarkCleaned={markCleaned}
+                  onRemove={setRemovingId}
+                  runningTotal={totalsByTable.get(t.id)}
+                />
+              ))
+            )}
+          </div>
         </>
       ) : (
         <ReservationsView tables={tables} />
@@ -241,7 +226,7 @@ export function TablesPage() {
       })()}
 
       {addingTable && (
-        <AddTableModal onClose={() => setAddingTable(false)} onAdd={(label, seats, type) => addTable(label, seats, type)} />
+        <AddTableModal onClose={() => setAddingTable(false)} onAdd={(label, seats) => addTable(label, seats)} />
       )}
     </div>
   )
@@ -341,14 +326,13 @@ function MergeModal({
   )
 }
 
-function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label: string, seats: number, type: 'table' | 'cabin') => Promise<{ ok: boolean; error?: string }> }) {
+function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label: string, seats: number) => Promise<{ ok: boolean; error?: string }> }) {
   const [label, setLabel] = useState('')
   const [seats, setSeats] = useState('4')
-  const [type, setType] = useState<'table' | 'cabin'>('table')
   const [error, setError] = useState<string | null>(null)
 
   async function handleAdd() {
-    const result = await onAdd(label.trim(), Number(seats) || 2, type)
+    const result = await onAdd(label.trim(), Number(seats) || 2)
     if (!result.ok) {
       setError(result.error ?? 'Something went wrong.')
       return
@@ -365,25 +349,12 @@ function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label:
           <button onClick={onClose} className="text-ink/40"><X size={20} /></button>
         </div>
         {error && <p className="text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2 mb-3">{error}</p>}
-        <div className="flex gap-2 mb-4">
-          {(['table', 'cabin'] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setType(t)}
-              className={`flex-1 text-sm font-semibold rounded-xl py-2.5 border capitalize ${
-                type === t ? 'bg-ink text-paper border-ink' : 'border-ink/10 text-ink/60'
-              }`}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-        <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Label</label>
+        <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Label / nickname</label>
         <input
           autoFocus
           value={label}
           onChange={(e) => { setLabel(e.target.value); setError(null) }}
-          placeholder={type === 'cabin' ? 'e.g. Cabin 1' : 'e.g. Table 9, Patio 1'}
+          placeholder="e.g. Table 9, Patio 1, Corner Booth"
           className="w-full mb-4 text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
         />
         <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Seats</label>
@@ -394,7 +365,7 @@ function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label:
           className="w-full mb-4 text-sm font-ticket border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
         />
         <Button className="w-full" disabled={!label.trim()} onClick={handleAdd}>
-          Add {type}
+          Add table
         </Button>
       </div>
     </div>

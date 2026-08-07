@@ -162,7 +162,6 @@ create table restaurant_tables (
   branch_id uuid references branches(id) on delete cascade,
   label text not null, -- "Table 1", "Patio 3"
   seats integer default 4,
-  type text not null default 'table' check (type in ('table', 'cabin')),
   status table_status not null default 'available',
   customer_name text,
   customer_phone text,
