@@ -125,31 +125,46 @@ export function TablesPage() {
             ))}
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            {loading ? (
-              Array.from({ length: 8 }).map((_, i) => (
+          {loading ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="h-28 rounded-2xl bg-ink/5 animate-pulse" />
-              ))
-            ) : visibleTables.length === 0 ? (
-              <p className="col-span-full text-sm text-ink/40 text-center py-10">
-                No tables yet — add one, or check that Supabase is connected and seeded.
-              </p>
-            ) : (
-              visibleTables.map((t) => (
-                <TableCard
-                  key={t.id}
-                  table={t}
-                  onSelect={handleSelectTable}
-                  onMove={setTransferringId}
-                  onMerge={setMergingId}
-                  onAssignCustomer={setAssigningCustomerId}
-                  onMarkCleaned={markCleaned}
-                  onRemove={setRemovingId}
-                  runningTotal={totalsByTable.get(t.id)}
-                />
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          ) : visibleTables.length === 0 ? (
+            <p className="text-sm text-ink/40 text-center py-10">
+              No tables yet — add one, or check that Supabase is connected and seeded.
+            </p>
+          ) : (
+            <>
+              {(['table', 'cabin'] as const).map((groupType) => {
+                const group = visibleTables.filter((t) => t.type === groupType)
+                if (group.length === 0) return null
+                return (
+                  <div key={groupType} className="mb-5 last:mb-0">
+                    <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-2">
+                      {groupType === 'cabin' ? 'Cabins' : 'Tables'} · {group.length}
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                      {group.map((t) => (
+                        <TableCard
+                          key={t.id}
+                          table={t}
+                          onSelect={handleSelectTable}
+                          onMove={setTransferringId}
+                          onMerge={setMergingId}
+                          onAssignCustomer={setAssigningCustomerId}
+                          onMarkCleaned={markCleaned}
+                          onRemove={setRemovingId}
+                          runningTotal={totalsByTable.get(t.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </>
+          )}
         </>
       ) : (
         <ReservationsView tables={tables} />
@@ -180,7 +195,8 @@ export function TablesPage() {
       )}
 
       {removingId && (() => {
-        const t = tables.find((tt) => tt.id === removingId)!
+        const t = tables.find((tt) => tt.id === removingId)
+        if (!t) return null
         return (
           <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setRemovingId(null)} />
@@ -199,7 +215,8 @@ export function TablesPage() {
       })()}
 
       {assigningCustomerId && (() => {
-        const t = tables.find((tt) => tt.id === assigningCustomerId)!
+        const t = tables.find((tt) => tt.id === assigningCustomerId)
+        if (!t) return null
         return (
           <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setAssigningCustomerId(null)} />
@@ -224,7 +241,7 @@ export function TablesPage() {
       })()}
 
       {addingTable && (
-        <AddTableModal onClose={() => setAddingTable(false)} onAdd={(label, seats) => addTable(label, seats)} />
+        <AddTableModal onClose={() => setAddingTable(false)} onAdd={(label, seats, type) => addTable(label, seats, type)} />
       )}
     </div>
   )
@@ -241,8 +258,10 @@ function TransferModal({
   onClose: () => void
   onConfirm: (toId: string) => void
 }) {
-  const from = tables.find((t) => t.id === fromId)!
+  const from = tables.find((t) => t.id === fromId)
   const available = tables.filter((t) => t.id !== fromId && t.status === 'available')
+
+  if (!from) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
@@ -284,10 +303,12 @@ function MergeModal({
   onClose: () => void
   onConfirm: (intoId: string) => void
 }) {
-  const from = tables.find((t) => t.id === fromId)!
+  const from = tables.find((t) => t.id === fromId)
   // Any other table already carrying an order can receive the merge — the
   // guests physically stay where they are, only the bill combines.
   const mergeable = tables.filter((t) => t.id !== fromId && (t.status === 'occupied' || t.status === 'billing'))
+
+  if (!from) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
@@ -320,13 +341,14 @@ function MergeModal({
   )
 }
 
-function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label: string, seats: number) => Promise<{ ok: boolean; error?: string }> }) {
+function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label: string, seats: number, type: 'table' | 'cabin') => Promise<{ ok: boolean; error?: string }> }) {
   const [label, setLabel] = useState('')
   const [seats, setSeats] = useState('4')
+  const [type, setType] = useState<'table' | 'cabin'>('table')
   const [error, setError] = useState<string | null>(null)
 
   async function handleAdd() {
-    const result = await onAdd(label.trim(), Number(seats) || 2)
+    const result = await onAdd(label.trim(), Number(seats) || 2, type)
     if (!result.ok) {
       setError(result.error ?? 'Something went wrong.')
       return
@@ -343,12 +365,25 @@ function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label:
           <button onClick={onClose} className="text-ink/40"><X size={20} /></button>
         </div>
         {error && <p className="text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2 mb-3">{error}</p>}
+        <div className="flex gap-2 mb-4">
+          {(['table', 'cabin'] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setType(t)}
+              className={`flex-1 text-sm font-semibold rounded-xl py-2.5 border capitalize ${
+                type === t ? 'bg-ink text-paper border-ink' : 'border-ink/10 text-ink/60'
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
         <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Label</label>
         <input
           autoFocus
           value={label}
           onChange={(e) => { setLabel(e.target.value); setError(null) }}
-          placeholder="e.g. Table 9, Patio 1"
+          placeholder={type === 'cabin' ? 'e.g. Cabin 1' : 'e.g. Table 9, Patio 1'}
           className="w-full mb-4 text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
         />
         <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Seats</label>
@@ -359,7 +394,7 @@ function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label:
           className="w-full mb-4 text-sm font-ticket border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
         />
         <Button className="w-full" disabled={!label.trim()} onClick={handleAdd}>
-          Add table
+          Add {type}
         </Button>
       </div>
     </div>

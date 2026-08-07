@@ -268,14 +268,18 @@ export function PurchasingPage() {
         />
       )}
 
-      {payingSupplier && (
-        <PaySupplierModal
-          supplier={suppliers.find((s) => s.id === payingSupplier)!}
-          paymentMethods={paymentMethods}
-          onClose={() => setPayingSupplier(null)}
-          onSubmit={(method, amount) => { recordSupplierPayment(payingSupplier, method, amount); setPayingSupplier(null) }}
-        />
-      )}
+      {payingSupplier && (() => {
+        const supplier = suppliers.find((s) => s.id === payingSupplier)
+        if (!supplier) return null
+        return (
+          <PaySupplierModal
+            supplier={supplier}
+            paymentMethods={paymentMethods}
+            onClose={() => setPayingSupplier(null)}
+            onSubmit={(method, amount) => { recordSupplierPayment(payingSupplier, method, amount); setPayingSupplier(null) }}
+          />
+        )
+      })()}
     </div>
   )
 }

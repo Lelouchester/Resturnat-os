@@ -211,7 +211,8 @@ export function StaffPage() {
       )}
 
       {removingId && (() => {
-        const s = staff.find((st) => st.id === removingId)!
+        const s = staff.find((st) => st.id === removingId)
+        if (!s) return null
         return (
           <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setRemovingId(null)} />

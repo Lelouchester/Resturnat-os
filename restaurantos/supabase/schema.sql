@@ -161,6 +161,7 @@ create table restaurant_tables (
   branch_id uuid references branches(id) on delete cascade,
   label text not null, -- "Table 1", "Patio 3"
   seats integer default 4,
+  type text not null default 'table' check (type in ('table', 'cabin')),
   status table_status not null default 'available',
   customer_name text,
   customer_phone text,
@@ -572,6 +573,41 @@ end;
 $$;
 
 grant execute on function transfer_funds(uuid, uuid, numeric, text) to authenticated;
+
+-- ----------------------------------------------------------------------------
+-- Atomically adjusts one account's balance by delta (positive or negative)
+-- and logs the matching ledger_entries row in the same statement/transaction.
+-- Used by deposit/withdraw/adjustBalance instead of a read-then-write from
+-- the client, which has a real race window under concurrent staff (two
+-- people completing Cash payments in the same instant could otherwise
+-- silently clobber one another). security invoker — respects the caller's
+-- normal RLS, no privilege bypass needed since staff already have write
+-- access to their own branch's accounts/ledger_entries.
+-- ----------------------------------------------------------------------------
+create or replace function increment_balance(p_account_id uuid, p_delta numeric, p_reason text, p_order_id uuid default null, p_purchase_id uuid default null)
+returns numeric
+language plpgsql security invoker as $$
+declare
+  v_staff_id uuid;
+  v_new_balance numeric;
+begin
+  select id into v_staff_id from staff where auth_user_id = auth.uid() and is_active limit 1;
+
+  update accounts set balance = balance + p_delta where id = p_account_id
+  returning balance into v_new_balance;
+
+  if v_new_balance is null then
+    raise exception 'account not found';
+  end if;
+
+  insert into ledger_entries (account_id, amount, reason, order_id, purchase_id, created_by)
+  values (p_account_id, p_delta, p_reason, p_order_id, p_purchase_id, v_staff_id);
+
+  return v_new_balance;
+end;
+$$;
+
+grant execute on function increment_balance(uuid, numeric, text, uuid, uuid) to authenticated;
 
 -- ============================================================================
 -- Row Level Security — every table, branch-scoped.

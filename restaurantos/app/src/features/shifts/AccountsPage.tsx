@@ -6,7 +6,7 @@ import { ReceiptView } from '../billing/ReceiptView'
 import { useShiftStore } from './shiftStore'
 import { useSettingsStore, type PaymentMethodConfig } from '../settings/settingsStore'
 import { useAccountsStore } from '../accounts/accountsStore'
-import { ArrowRightLeft, ShieldAlert } from 'lucide-react'
+import { ArrowRightLeft, ShieldAlert, Pencil } from 'lucide-react'
 import { useShiftLedger, fetchOrderHistory, type OrderHistoryRow } from './useShiftSales'
 import { usePurchasingStore } from '../purchasing/purchasingStore'
 import { useCustomersStore } from '../customers/customersStore'
@@ -501,6 +501,8 @@ function TransfersCard({
   const transfers = useAccountsStore((s) => s.transfers)
   const transfersLoading = useAccountsStore((s) => s.transfersLoading)
   const transferFunds = useAccountsStore((s) => s.transferFunds)
+  const adjustBalance = useAccountsStore((s) => s.adjustBalance)
+  const [adjusting, setAdjusting] = useState<PaymentMethodConfig | null>(null)
   const init = useAccountsStore((s) => s.init)
 
   useEffect(() => {
@@ -563,12 +565,27 @@ function TransfersCard({
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-1">
           {paymentMethods.map((m) => (
             <div key={m.key} className="rounded-xl border border-ink/10 p-3">
-              <div className="text-xs text-ink/50 mb-0.5">{m.label}{m.isInternal ? ' (internal)' : ''}</div>
+              <div className="flex items-center justify-between mb-0.5">
+                <div className="text-xs text-ink/50">{m.label}{m.isInternal ? ' (internal)' : ''}</div>
+                <button onClick={() => setAdjusting(m)} className="text-ink/30 hover:text-ink"><Pencil size={12} /></button>
+              </div>
               <div className="font-ticket text-lg font-bold">Rs. {(balances[m.key] ?? 0).toLocaleString()}</div>
             </div>
           ))}
         </div>
       </Card>
+
+      {adjusting && (
+        <AdjustBalanceModal
+          method={adjusting}
+          currentBalance={balances[adjusting.key] ?? 0}
+          onSave={async (newBalance, note) => {
+            await adjustBalance(adjusting.key, newBalance, note)
+            setAdjusting(null)
+          }}
+          onClose={() => setAdjusting(null)}
+        />
+      )}
 
       <Card className="p-5 mb-4">
         <div className="flex items-center justify-between mb-3">
@@ -617,24 +634,36 @@ function TransfersCard({
               <button onClick={() => setShowTransfer(false)} className="text-ink/40"><X size={20} /></button>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              <div>
+            {internalPaymentMethods.length === 1 ? (
+              <div className="mb-4">
                 <label className="text-xs font-semibold text-ink/50 mb-1.5 block">From</label>
                 <select value={fromKey} onChange={(e) => setFromKey(e.target.value)} className="w-full text-sm border border-ink/10 rounded-xl px-2 py-2.5 outline-none focus:border-ember bg-surface">
-                  {paymentMethods.map((m) => (
+                  {paymentMethods.filter((m) => m.key !== toKey).map((m) => (
                     <option key={m.key} value={m.key}>{m.label} (Rs. {(balances[m.key] ?? 0).toLocaleString()})</option>
                   ))}
                 </select>
+                <p className="text-xs text-ink/40 mt-1.5">Going to {internalPaymentMethods[0].label}.</p>
               </div>
-              <div>
-                <label className="text-xs font-semibold text-ink/50 mb-1.5 block">To</label>
-                <select value={toKey} onChange={(e) => setToKey(e.target.value)} className="w-full text-sm border border-ink/10 rounded-xl px-2 py-2.5 outline-none focus:border-ember bg-surface">
-                  {paymentMethods.map((m) => (
-                    <option key={m.key} value={m.key}>{m.label}</option>
-                  ))}
-                </select>
+            ) : (
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <div>
+                  <label className="text-xs font-semibold text-ink/50 mb-1.5 block">From</label>
+                  <select value={fromKey} onChange={(e) => setFromKey(e.target.value)} className="w-full text-sm border border-ink/10 rounded-xl px-2 py-2.5 outline-none focus:border-ember bg-surface">
+                    {paymentMethods.map((m) => (
+                      <option key={m.key} value={m.key}>{m.label} (Rs. {(balances[m.key] ?? 0).toLocaleString()})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-ink/50 mb-1.5 block">To</label>
+                  <select value={toKey} onChange={(e) => setToKey(e.target.value)} className="w-full text-sm border border-ink/10 rounded-xl px-2 py-2.5 outline-none focus:border-ember bg-surface">
+                    {paymentMethods.map((m) => (
+                      <option key={m.key} value={m.key}>{m.label}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs font-semibold text-ink/50 block">Amount (Rs.)</label>
@@ -666,6 +695,71 @@ function TransfersCard({
         </div>
       )}
     </>
+  )
+}
+
+function AdjustBalanceModal({
+  method,
+  currentBalance,
+  onSave,
+  onClose,
+}: {
+  method: PaymentMethodConfig
+  currentBalance: number
+  onSave: (newBalance: number, note: string) => Promise<void>
+  onClose: () => void
+}) {
+  const [value, setValue] = useState(String(currentBalance))
+  const [note, setNote] = useState('')
+  const [saving, setSaving] = useState(false)
+  const newBalance = Number(value) || 0
+  const delta = newBalance - currentBalance
+
+  async function handleSave() {
+    setSaving(true)
+    await onSave(newBalance, note)
+    setSaving(false)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-ticket text-lg font-bold">Adjust {method.label}</h2>
+          <button onClick={onClose} className="text-ink/40"><X size={20} /></button>
+        </div>
+        <p className="text-xs text-ink/40 mb-4">
+          Corrects the stored balance to match what's actually there — logged as an entry, not a silent overwrite, so the audit trail stays intact.
+        </p>
+
+        <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Correct balance right now (Rs.)</label>
+        <input
+          type="number"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          autoFocus
+          className="w-full mb-1 text-lg font-ticket font-bold border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
+        />
+        {delta !== 0 && (
+          <p className="text-xs mb-4" style={{ color: delta > 0 ? 'var(--color-status-available)' : 'var(--color-status-cleaning)' }}>
+            {delta > 0 ? '+' : ''}Rs. {delta.toLocaleString()} from what's currently stored (Rs. {currentBalance.toLocaleString()})
+          </p>
+        )}
+
+        <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Why (optional, but helps later)</label>
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="e.g. reconciled with physical count"
+          className="w-full mb-5 text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
+        />
+
+        <Button className="w-full" disabled={saving || delta === 0} onClick={handleSave}>
+          {saving ? 'Saving…' : delta === 0 ? 'No change to save' : 'Save correction'}
+        </Button>
+      </div>
+    </div>
   )
 }
 

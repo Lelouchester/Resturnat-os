@@ -21,7 +21,7 @@ interface TablesState {
   markArrived: (tableId: string) => Promise<void>
   updateGuestInfo: (tableId: string, info: { customerName: string; customerPhone?: string; customerId?: string; guestCount?: number }) => Promise<void>
   markCleaned: (tableId: string) => Promise<void>
-  addTable: (label: string, seats: number) => Promise<{ ok: boolean; error?: string }>
+  addTable: (label: string, seats: number, type?: 'table' | 'cabin') => Promise<{ ok: boolean; error?: string }>
   archiveTable: (tableId: string) => Promise<{ ok: boolean; error?: string }>
 }
 
@@ -30,6 +30,7 @@ function mapRow(row: any): RestaurantTable {
     id: row.id,
     label: row.label,
     seats: row.seats,
+    type: row.type ?? 'table',
     status: row.status,
     customerName: row.customer_name ?? undefined,
     customerPhone: row.customer_phone ?? undefined,
@@ -140,7 +141,7 @@ export const useTablesStore = create<TablesState>((set, get) => ({
     if (error) console.error('[tablesStore] markCleaned failed', error)
   },
 
-  addTable: async (label, seats) => {
+  addTable: async (label, seats, type = 'table') => {
     // Two tables with the same number at once is exactly the mix-up this
     // guards against — order data, kitchen tickets, and billing all key off
     // the label being unique among currently-active tables.
@@ -150,7 +151,7 @@ export const useTablesStore = create<TablesState>((set, get) => ({
     }
     const { error } = await supabase
       .from('restaurant_tables')
-      .insert({ branch_id: CURRENT_BRANCH_ID, label, seats, status: 'available' })
+      .insert({ branch_id: CURRENT_BRANCH_ID, label, seats, type, status: 'available' })
     if (error) {
       console.error('[tablesStore] addTable failed', error)
       return { ok: false, error: 'Something went wrong adding this table.' }

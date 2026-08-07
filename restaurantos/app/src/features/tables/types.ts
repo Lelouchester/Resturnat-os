@@ -4,6 +4,7 @@ export interface RestaurantTable {
   id: string
   label: string
   seats: number
+  type: 'table' | 'cabin'
   status: TableStatus
   customerName?: string
   customerPhone?: string

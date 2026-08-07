@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
 import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
 import { useSettingsStore } from '../settings/settingsStore'
-import { useAuthStore } from '../auth/authStore'
 
 /**
  * Real data now — running balance per payment method (Cash, eSewa, Fonepay,
@@ -25,6 +24,7 @@ export interface TransferRow {
   note: string | null
   createdByName: string | null
   createdAt: string
+  isAdjustment?: boolean
 }
 
 interface AccountsState {
@@ -38,16 +38,13 @@ interface AccountsState {
   methodIdForKey: (key: string) => string | undefined
   deposit: (key: string, amount: number, opts?: { orderId?: string; reason?: string }) => Promise<void>
   withdraw: (key: string, amount: number, opts?: { purchaseId?: string; reason?: string }) => Promise<void>
+  adjustBalance: (key: string, newBalance: number, note?: string) => Promise<{ ok: boolean; error?: string }>
   transferFunds: (fromKey: string, toKey: string, amount: number, note?: string) => Promise<{ ok: boolean; error?: string }>
   loadTransfers: () => Promise<void>
 }
 
 function methodIdForKey(key: string): string | undefined {
   return useSettingsStore.getState().paymentMethods.find((m) => m.key === key)?.id
-}
-
-function currentStaffId(): string | undefined {
-  return useAuthStore.getState().staff?.id
 }
 
 async function loadBalances(): Promise<{ balances: Record<string, number>; accountIds: Record<string, string> }> {
@@ -73,40 +70,64 @@ async function loadBalances(): Promise<{ balances: Record<string, number>; accou
 }
 
 async function loadTransfers(): Promise<TransferRow[]> {
-  const { data, error } = await supabase
-    .from('account_transfers')
-    .select(
-      `id, amount, note, created_at,
-       from:accounts!account_transfers_from_account_id_fkey ( payment_methods ( key, label ) ),
-       to:accounts!account_transfers_to_account_id_fkey ( payment_methods ( key, label ) ),
-       staff ( name )`
-    )
-    .eq('branch_id', CURRENT_BRANCH_ID)
-    .order('created_at', { ascending: false })
+  const [transfersRes, adjustmentsRes] = await Promise.all([
+    supabase
+      .from('account_transfers')
+      .select(
+        `id, amount, note, created_at,
+         from:accounts!account_transfers_from_account_id_fkey ( payment_methods ( key, label ) ),
+         to:accounts!account_transfers_to_account_id_fkey ( payment_methods ( key, label ) ),
+         staff ( name )`
+      )
+      .eq('branch_id', CURRENT_BRANCH_ID)
+      .order('created_at', { ascending: false }),
+    // Balance corrections (adjustBalance) write a single ledger_entries row
+    // rather than a paired account_transfers row — pull those in too so
+    // this is one real audit trail, not two half ones.
+    supabase
+      .from('ledger_entries')
+      .select(`id, amount, reason, created_at, accounts!inner ( branch_id, payment_methods ( key, label ) ), staff ( name )`)
+      .eq('accounts.branch_id', CURRENT_BRANCH_ID)
+      .ilike('reason', 'Balance adjustment%')
+      .order('created_at', { ascending: false }),
+  ])
 
-  if (error) {
-    // Staff without the 'financials' permission get an empty/denied result
-    // here (RLS), which is expected — not logged as an error.
-    return []
-  }
-  return (data ?? []).map((row: any) => ({
-    id: row.id,
-    fromKey: row.from?.payment_methods?.key ?? '—',
-    fromLabel: row.from?.payment_methods?.label ?? 'Unknown',
-    toKey: row.to?.payment_methods?.key ?? '—',
-    toLabel: row.to?.payment_methods?.label ?? 'Unknown',
-    amount: Number(row.amount),
-    note: row.note,
-    createdByName: row.staff?.name ?? null,
-    createdAt: row.created_at,
-  }))
+  const transfers: TransferRow[] = transfersRes.error
+    ? []
+    : (transfersRes.data ?? []).map((row: any) => ({
+        id: row.id,
+        fromKey: row.from?.payment_methods?.key ?? '—',
+        fromLabel: row.from?.payment_methods?.label ?? 'Unknown',
+        toKey: row.to?.payment_methods?.key ?? '—',
+        toLabel: row.to?.payment_methods?.label ?? 'Unknown',
+        amount: Number(row.amount),
+        note: row.note,
+        createdByName: row.staff?.name ?? null,
+        createdAt: row.created_at,
+      }))
+
+  const adjustments: TransferRow[] = adjustmentsRes.error
+    ? []
+    : (adjustmentsRes.data ?? []).map((row: any) => ({
+        id: row.id,
+        fromKey: '',
+        fromLabel: row.accounts?.payment_methods?.label ?? 'Unknown',
+        toKey: '',
+        toLabel: row.accounts?.payment_methods?.label ?? 'Unknown',
+        amount: Number(row.amount),
+        note: row.reason,
+        createdByName: row.staff?.name ?? null,
+        createdAt: row.created_at,
+        isAdjustment: true,
+      }))
+
+  return [...transfers, ...adjustments].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 }
 
-// Moves money for one payment method: read-modify-write the running balance,
-// then log a ledger entry against it. Not atomic against a concurrent write
-// to the *same* method from another device in the same instant — acceptable
-// for a single-cafe till; worth a Postgres RPC (`increment_balance`) if this
-// ever needs to survive true concurrent writers.
+// Moves money for one payment method via increment_balance(), an atomic
+// single-statement update — not a client-side read-modify-write, so two
+// staff completing payments in the same method at the same instant can't
+// silently clobber one another.
 async function moveBalance(key: string, delta: number, reason: string, orderId?: string, purchaseId?: string) {
   const methodId = methodIdForKey(key)
   if (!methodId) {
@@ -115,7 +136,7 @@ async function moveBalance(key: string, delta: number, reason: string, orderId?:
   }
   const { data: account, error: fetchErr } = await supabase
     .from('accounts')
-    .select('id, balance')
+    .select('id')
     .eq('branch_id', CURRENT_BRANCH_ID)
     .eq('payment_method_id', methodId)
     .maybeSingle()
@@ -125,16 +146,14 @@ async function moveBalance(key: string, delta: number, reason: string, orderId?:
     return
   }
 
-  const { error: updErr } = await supabase
-    .from('accounts')
-    .update({ balance: Number(account.balance) + delta })
-    .eq('id', account.id)
-  if (updErr) console.error('[accountsStore] balance update failed', updErr)
-
-  const { error: ledgerErr } = await supabase
-    .from('ledger_entries')
-    .insert({ account_id: account.id, amount: delta, reason, order_id: orderId ?? null, purchase_id: purchaseId ?? null, created_by: currentStaffId() ?? null })
-  if (ledgerErr) console.error('[accountsStore] ledger entry failed', ledgerErr)
+  const { error } = await supabase.rpc('increment_balance', {
+    p_account_id: account.id,
+    p_delta: delta,
+    p_reason: reason,
+    p_order_id: orderId ?? null,
+    p_purchase_id: purchaseId ?? null,
+  })
+  if (error) console.error('[accountsStore] increment_balance failed', error)
 }
 
 export const useAccountsStore = create<AccountsState>((set, get) => ({
@@ -183,6 +202,16 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
     if (amount <= 0) return
     await moveBalance(key, -amount, opts?.reason ?? 'purchase payment', undefined, opts?.purchaseId)
     set({ ...(await loadBalances()) })
+  },
+
+  adjustBalance: async (key, newBalance, note) => {
+    const { balances } = get()
+    const current = balances[key] ?? 0
+    const delta = newBalance - current
+    if (delta === 0) return { ok: true }
+    await moveBalance(key, delta, note?.trim() ? `Balance adjustment: ${note.trim()}` : 'Balance adjustment')
+    set({ ...(await loadBalances()) })
+    return { ok: true }
   },
 
   transferFunds: async (fromKey, toKey, amount, note) => {
