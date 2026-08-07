@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { currentBranchId } from '../auth/authStore'
 
 export interface PaymentMethodConfig {
   id: string // real Supabase row id — used for FK references once Billing/Shifts/Purchasing write against it
@@ -44,11 +44,11 @@ let pendingPatch: Partial<RestaurantSettings> = {}
 
 async function loadProfile(): Promise<RestaurantSettings> {
   const [{ data: branch, error: branchErr }, { data: rs, error: rsErr }] = await Promise.all([
-    supabase.from('branches').select('name, address, phone, slogan, notes').eq('id', CURRENT_BRANCH_ID).maybeSingle(),
+    supabase.from('branches').select('name, address, phone, slogan, notes').eq('id', currentBranchId()).maybeSingle(),
     supabase
       .from('restaurant_settings')
       .select('open_time, close_time, default_tax_pct, default_service_charge_pct, receipt_footer, google_review_link, theme, brand_color, due_reminder_days')
-      .eq('branch_id', CURRENT_BRANCH_ID)
+      .eq('branch_id', currentBranchId())
       .maybeSingle(),
   ])
   if (branchErr) console.error('[settingsStore] failed to load branch profile', branchErr)
@@ -102,11 +102,11 @@ function schedulePersist(patch: Partial<RestaurantSettings>) {
     if (toSave.dueReminderDays !== undefined) settingsPatch.due_reminder_days = toSave.dueReminderDays
 
     if (Object.keys(branchPatch).length > 0) {
-      const { error } = await supabase.from('branches').update(branchPatch).eq('id', CURRENT_BRANCH_ID)
+      const { error } = await supabase.from('branches').update(branchPatch).eq('id', currentBranchId())
       if (error) console.error('[settingsStore] failed to save branch profile', error)
     }
     if (Object.keys(settingsPatch).length > 0) {
-      const { error } = await supabase.from('restaurant_settings').update(settingsPatch).eq('branch_id', CURRENT_BRANCH_ID)
+      const { error } = await supabase.from('restaurant_settings').update(settingsPatch).eq('branch_id', currentBranchId())
       if (error) console.error('[settingsStore] failed to save restaurant settings', error)
     }
   }, 600)
@@ -140,13 +140,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     loadProfile().then((profile) => set({ ...profile, profileLoading: false }))
 
     supabase
-      .channel(`branch-profile:${CURRENT_BRANCH_ID}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'branches', filter: `id=eq.${CURRENT_BRANCH_ID}` }, () =>
+      .channel(`branch-profile:${currentBranchId()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'branches', filter: `id=eq.${currentBranchId()}` }, () =>
         loadProfile().then((profile) => set(profile))
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'restaurant_settings', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` },
+        { event: '*', schema: 'public', table: 'restaurant_settings', filter: `branch_id=eq.${currentBranchId()}` },
         () => loadProfile().then((profile) => set(profile))
       )
       .subscribe()
@@ -173,7 +173,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const { data, error } = await supabase
         .from('payment_methods')
         .select('id, key, label, is_internal')
-        .eq('branch_id', CURRENT_BRANCH_ID)
+        .eq('branch_id', currentBranchId())
         .order('sort_order')
 
       if (error) {
@@ -189,10 +189,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     load()
 
     supabase
-      .channel(`payment_methods:${CURRENT_BRANCH_ID}`)
+      .channel(`payment_methods:${currentBranchId()}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'payment_methods', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` },
+        { event: '*', schema: 'public', table: 'payment_methods', filter: `branch_id=eq.${currentBranchId()}` },
         (payload) => {
           set((state) => {
             if (payload.eventType === 'DELETE') {
@@ -217,7 +217,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const sortOrder = get().paymentMethods.length + 1
     const { data, error } = await supabase
       .from('payment_methods')
-      .insert({ branch_id: CURRENT_BRANCH_ID, key, label, sort_order: sortOrder })
+      .insert({ branch_id: currentBranchId(), key, label, sort_order: sortOrder })
       .select()
       .single()
     if (error || !data) {
@@ -229,7 +229,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     // for it — easy to forget since it's a second table.
     const { error: acctError } = await supabase
       .from('accounts')
-      .insert({ branch_id: CURRENT_BRANCH_ID, payment_method_id: data.id, balance: 0 })
+      .insert({ branch_id: currentBranchId(), payment_method_id: data.id, balance: 0 })
     if (acctError) console.error('[settingsStore] failed to create matching account row', acctError)
   },
 
@@ -237,7 +237,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const { error } = await supabase
       .from('payment_methods')
       .delete()
-      .eq('branch_id', CURRENT_BRANCH_ID)
+      .eq('branch_id', currentBranchId())
       .eq('key', key)
     if (error) console.error('[settingsStore] removePaymentMethod failed', error)
   },

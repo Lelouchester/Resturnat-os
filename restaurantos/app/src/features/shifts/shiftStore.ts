@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
-import { useAuthStore } from '../auth/authStore'
+import { useAuthStore, currentBranchId } from '../auth/authStore'
 import { useSettingsStore } from '../settings/settingsStore'
 import type { ActiveShift, MethodBalances } from './types'
 
@@ -39,7 +38,7 @@ async function loadCurrentShift(): Promise<{ shift: ActiveShift | null; lastClos
   const { data: openShifts, error: openError } = await supabase
     .from('shifts')
     .select('id, opened_at, staff:opened_by(name), shift_balances(payment_method_id, opening_amount, payment_methods(key))')
-    .eq('branch_id', CURRENT_BRANCH_ID)
+    .eq('branch_id', currentBranchId())
     .eq('status', 'open')
     .order('opened_at', { ascending: false })
     .limit(1)
@@ -66,7 +65,7 @@ async function loadCurrentShift(): Promise<{ shift: ActiveShift | null; lastClos
   const { data: lastClosed } = await supabase
     .from('shifts')
     .select('id, shift_balances(closing_amount, payment_methods(key))')
-    .eq('branch_id', CURRENT_BRANCH_ID)
+    .eq('branch_id', currentBranchId())
     .eq('status', 'closed')
     .order('closed_at', { ascending: false })
     .limit(1)
@@ -98,8 +97,8 @@ export const useShiftStore = create<ShiftState>((set, get) => ({
     loadCurrentShift().then(({ shift, lastClosing }) => set({ shift, lastClosing, loading: false }))
 
     supabase
-      .channel(`shifts:${CURRENT_BRANCH_ID}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` }, () => {
+      .channel(`shifts:${currentBranchId()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts', filter: `branch_id=eq.${currentBranchId()}` }, () => {
         // Shift open/close changes more than one field across two tables at
         // once — simplest correct thing is to just reload the current state
         // rather than try to patch it in place from a partial payload.
@@ -117,7 +116,7 @@ export const useShiftStore = create<ShiftState>((set, get) => ({
     const { data: existing, error: existingErr } = await supabase
       .from('shifts')
       .select('id')
-      .eq('branch_id', CURRENT_BRANCH_ID)
+      .eq('branch_id', currentBranchId())
       .eq('status', 'open')
       .limit(1)
     if (existingErr) {
@@ -132,7 +131,7 @@ export const useShiftStore = create<ShiftState>((set, get) => ({
 
     const { data: newShift, error: shiftError } = await supabase
       .from('shifts')
-      .insert({ branch_id: CURRENT_BRANCH_ID, opened_by: useAuthStore.getState().staff?.id ?? null, status: 'open' })
+      .insert({ branch_id: currentBranchId(), opened_by: useAuthStore.getState().staff?.id ?? null, status: 'open' })
       .select()
       .single()
 

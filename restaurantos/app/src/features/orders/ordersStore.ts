@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
-import { useAuthStore } from '../auth/authStore'
+import { useAuthStore, currentBranchId } from '../auth/authStore'
 import { useShiftStore } from '../shifts/shiftStore'
 import { useTablesStore } from '../tables/tablesStore'
 import { useAccountsStore } from '../accounts/accountsStore'
@@ -108,7 +107,7 @@ async function loadOpenOrders(): Promise<LiveOrder[]> {
   const { data, error } = await supabase
     .from('orders')
     .select(ORDER_SELECT)
-    .eq('branch_id', CURRENT_BRANCH_ID)
+    .eq('branch_id', currentBranchId())
     .in('status', ['open', 'billing'])
     .order('opened_at')
 
@@ -139,10 +138,10 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     // linkage all at once — reload rather than patch, same reasoning as
     // shiftStore.
     supabase
-      .channel(`orders:${CURRENT_BRANCH_ID}`)
+      .channel(`orders:${currentBranchId()}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'orders', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` },
+        { event: '*', schema: 'public', table: 'orders', filter: `branch_id=eq.${currentBranchId()}` },
         () => loadOpenOrders().then((orders) => set({ orders }))
       )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, () =>
@@ -161,7 +160,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     const shiftId = useShiftStore.getState().shift?.id
     const { data, error } = await supabase
       .from('orders')
-      .insert({ branch_id: CURRENT_BRANCH_ID, table_id: tableId, shift_id: shiftId ?? null, waiter_id: useAuthStore.getState().staff?.id ?? null, status: 'open' })
+      .insert({ branch_id: currentBranchId(), table_id: tableId, shift_id: shiftId ?? null, waiter_id: useAuthStore.getState().staff?.id ?? null, status: 'open' })
       .select()
       .single()
 

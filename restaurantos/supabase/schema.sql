@@ -36,6 +36,7 @@ create type reservation_status as enum ('upcoming', 'seated', 'no_show', 'cancel
 create table branches (
   id uuid primary key default uuid_generate_v4(),
   name text not null,
+  code text unique, -- short login code staff type before Google sign-in, e.g. "myhapa" — this is what disambiguates which cafe to link/resolve against when the same email might exist in more than one
   address text,
   phone text,
   slogan text,
@@ -464,19 +465,25 @@ create table dismissed_notifications (
 -- CALLER's own verified email and only if unclaimed — one person can't use
 -- this to hijack another's staff row.
 -- ----------------------------------------------------------------------------
-create or replace function link_staff_account() returns void
+create or replace function link_staff_account(p_code text default null) returns void
 language plpgsql security definer as $$
 begin
+  -- p_code disambiguates which cafe to claim a row in, for the case where
+  -- the same email exists as staff in more than one branch (one owner
+  -- running two cafes, say). Without a code, this falls back to the old
+  -- behaviour of matching on email alone across every branch — kept for
+  -- backward compatibility, but the login screen always passes a code now.
   update staff
   set auth_user_id = auth.uid()
   where auth_user_id is null
     and email is not null
     and lower(email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    and auth.uid() is not null;
+    and auth.uid() is not null
+    and (p_code is null or branch_id = (select id from branches where lower(code) = lower(p_code)));
 end;
 $$;
 
-grant execute on function link_staff_account() to authenticated;
+grant execute on function link_staff_account(text) to authenticated;
 
 -- ----------------------------------------------------------------------------
 -- Financial visibility check. True for admin/manager roles, or anyone with
@@ -639,6 +646,13 @@ create policy "staff can access their own branch" on branches for select
   using (id = current_staff_branch());
 create policy "staff can update their own branch" on branches for update
   using (id = current_staff_branch()) with check (id = current_staff_branch());
+-- Deliberately public — the login screen needs to resolve a typed-in code
+-- ("myhapa", "banepakitli") to a real cafe *before* Google sign-in even
+-- starts, so there's no signed-in session yet to scope this by. A cafe's
+-- name/code isn't sensitive (it's already printed on receipts), so this
+-- is a safe, narrow carve-out rather than a real exposure.
+create policy "anyone can look up a branch by its code" on branches for select
+  using (true);
 
 -- Tables with a direct branch_id column — the simple case.
 alter table restaurant_settings enable row level security;

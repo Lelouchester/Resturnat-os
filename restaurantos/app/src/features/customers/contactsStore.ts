@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { currentBranchId } from '../auth/authStore'
 
 export interface Contact {
   id: string
@@ -31,7 +31,7 @@ function mapRow(row: any): Contact {
 }
 
 async function loadContacts(): Promise<Contact[]> {
-  const { data, error } = await supabase.from('contacts').select('*').eq('branch_id', CURRENT_BRANCH_ID).order('name')
+  const { data, error } = await supabase.from('contacts').select('*').eq('branch_id', currentBranchId()).order('name')
   if (error) {
     console.error('[contactsStore] failed to load contacts', error)
     return []
@@ -55,8 +55,8 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
     })
 
     supabase
-      .channel(`contacts:${CURRENT_BRANCH_ID}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` }, () =>
+      .channel(`contacts:${currentBranchId()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts', filter: `branch_id=eq.${currentBranchId()}` }, () =>
         loadContacts().then((contacts) => set({ contacts }))
       )
       .subscribe()
@@ -64,7 +64,7 @@ export const useContactsStore = create<ContactsState>((set, get) => ({
 
   addContact: async (contact) => {
     const { error } = await supabase.from('contacts').insert({
-      branch_id: CURRENT_BRANCH_ID,
+      branch_id: currentBranchId(),
       name: contact.name,
       phone: contact.phone || null,
       role: contact.role || null,

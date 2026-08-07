@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { currentBranchId } from '../auth/authStore'
 import type { MenuCategory, MenuItem } from './types'
 
 /**
@@ -43,8 +43,8 @@ const ITEM_SELECT = '*, combo_components:menu_item_combo_components!combo_item_i
 
 async function loadAll() {
   const [{ data: categories, error: catError }, { data: items, error: itemError }] = await Promise.all([
-    supabase.from('menu_categories').select('id, name, exclude_from_discount').eq('branch_id', CURRENT_BRANCH_ID).order('sort_order'),
-    supabase.from('menu_items').select(ITEM_SELECT).eq('branch_id', CURRENT_BRANCH_ID).order('sort_order'),
+    supabase.from('menu_categories').select('id, name, exclude_from_discount').eq('branch_id', currentBranchId()).order('sort_order'),
+    supabase.from('menu_items').select(ITEM_SELECT).eq('branch_id', currentBranchId()).order('sort_order'),
   ])
   if (catError) console.error('[menuStore] failed to load categories', catError)
   if (itemError) console.error('[menuStore] failed to load items', itemError)
@@ -70,11 +70,11 @@ export const useMenuStore = create<MenuState>((set, get) => ({
     // combo edit also touches the join table — simplest correct approach is
     // reloading everything on any change rather than patching selectively.
     supabase
-      .channel(`menu:${CURRENT_BRANCH_ID}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` }, () => {
+      .channel(`menu:${currentBranchId()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items', filter: `branch_id=eq.${currentBranchId()}` }, () => {
         loadAll().then(({ categories, items }) => set({ categories, items }))
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_categories', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_categories', filter: `branch_id=eq.${currentBranchId()}` }, () => {
         loadAll().then(({ categories, items }) => set({ categories, items }))
       })
       .subscribe()
@@ -84,7 +84,7 @@ export const useMenuStore = create<MenuState>((set, get) => ({
     const sortOrder = get().categories.length + 1
     const { error } = await supabase
       .from('menu_categories')
-      .insert({ branch_id: CURRENT_BRANCH_ID, name, sort_order: sortOrder })
+      .insert({ branch_id: currentBranchId(), name, sort_order: sortOrder })
     if (error) {
       console.error('[menuStore] addCategory failed', error)
       return
@@ -123,7 +123,7 @@ export const useMenuStore = create<MenuState>((set, get) => ({
 
   saveItem: async (data) => {
     const payload = {
-      branch_id: CURRENT_BRANCH_ID,
+      branch_id: currentBranchId(),
       category_id: data.categoryId,
       name: data.name,
       price: data.price,

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { currentBranchId } from '../auth/authStore'
 import type { Reservation } from './types'
 
 /**
@@ -37,7 +37,7 @@ async function loadReservations(): Promise<Reservation[]> {
   const { data, error } = await supabase
     .from('reservations')
     .select('*')
-    .eq('branch_id', CURRENT_BRANCH_ID)
+    .eq('branch_id', currentBranchId())
     .order('arrival_time')
   if (error) {
     console.error('[reservationsStore] failed to load reservations', error)
@@ -62,8 +62,8 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
     })
 
     supabase
-      .channel(`reservations:${CURRENT_BRANCH_ID}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` }, () =>
+      .channel(`reservations:${currentBranchId()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations', filter: `branch_id=eq.${currentBranchId()}` }, () =>
         loadReservations().then((reservations) => set({ reservations }))
       )
       .subscribe()
@@ -71,7 +71,7 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
 
   addReservation: async (r) => {
     const { error } = await supabase.from('reservations').insert({
-      branch_id: CURRENT_BRANCH_ID,
+      branch_id: currentBranchId(),
       guest_name: r.guestName,
       phone: r.phone || null,
       party_size: r.partySize,

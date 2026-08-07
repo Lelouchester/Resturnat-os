@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { currentBranchId } from '../auth/authStore'
 import type { StaffMember, StaffRole, FeatureKey } from './types'
 import { DEFAULT_PERMISSIONS, FEATURES } from './types'
 
@@ -32,6 +32,7 @@ function mapStaffRow(row: any): StaffMember {
   }
   return {
     id: row.id,
+    branchId: row.branch_id,
     name: row.name,
     email: row.email ?? undefined,
     role,
@@ -49,7 +50,7 @@ async function loadStaff(): Promise<StaffMember[]> {
   const { data, error } = await supabase
     .from('staff')
     .select('*, permissions ( feature_key, allowed )')
-    .eq('branch_id', CURRENT_BRANCH_ID)
+    .eq('branch_id', currentBranchId())
     .order('created_at')
   if (error) {
     console.error('[staffStore] failed to load staff', error)
@@ -70,8 +71,8 @@ export const useStaffStore = create<StaffState>((set, get) => ({
     loadStaff().then((staff) => set({ staff, loading: false }))
 
     supabase
-      .channel(`staff:${CURRENT_BRANCH_ID}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'staff', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` }, () =>
+      .channel(`staff:${currentBranchId()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'staff', filter: `branch_id=eq.${currentBranchId()}` }, () =>
         loadStaff().then((staff) => set({ staff }))
       )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'permissions' }, () => loadStaff().then((staff) => set({ staff })))
@@ -81,7 +82,7 @@ export const useStaffStore = create<StaffState>((set, get) => ({
   addStaff: async (name, email, role) => {
     const { error } = await supabase
       .from('staff')
-      .insert({ branch_id: CURRENT_BRANCH_ID, name, email: email.trim().toLowerCase(), role, is_active: true })
+      .insert({ branch_id: currentBranchId(), name, email: email.trim().toLowerCase(), role, is_active: true })
     if (error) console.error('[staffStore] addStaff failed', error)
     set({ staff: await loadStaff() })
   },

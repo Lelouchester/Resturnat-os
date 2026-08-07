@@ -40,6 +40,7 @@ function only(keys: FeatureKey[]): Permissions {
 
 export interface StaffMember {
   id: string
+  branchId: string // which cafe this person belongs to — resolved per signed-in person, not hardcoded
   name: string
   email?: string // matched against their Google account on first sign-in
   role: StaffRole

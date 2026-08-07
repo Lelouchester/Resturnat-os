@@ -1,10 +1,7 @@
 /**
- * Single-branch placeholder. Once multi-branch switching is built, this
- * becomes "whichever branch this deployment/device is configured for"
- * instead of a hardcoded constant — for now, one deployment = one cafe.
- *
- * There is no CURRENT_STAFF_ID anymore — the real signed-in staff member
- * (via Google sign-in) is read from useAuthStore().staff.id at the point of
- * use, since it depends on who's actually logged in.
+ * Multi-branch is live — see currentBranchId() in features/auth/authStore.ts
+ * for how "which cafe am I" is actually resolved now (per signed-in staff
+ * member, not a hardcoded constant). Nothing in this file needs it directly;
+ * this comment is just here so nobody goes looking for a removed constant
+ * and wonders where it went.
  */
-export const CURRENT_BRANCH_ID = '00000000-0000-0000-0000-000000000001'

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { currentBranchId } from '../auth/authStore'
 
 export type ReportRange = 'Today' | '7 days' | '30 days'
 
@@ -55,7 +55,7 @@ async function loadReports(range: ReportRange): Promise<ReportsData> {
        order_items ( quantity, unit_price, is_complimentary, status, custom_name, created_at, status_updated_at, menu_items ( name ) ),
        payments ( amount, payment_methods ( key, label ) )`
     )
-    .eq('branch_id', CURRENT_BRANCH_ID)
+    .eq('branch_id', currentBranchId())
     .eq('status', 'paid')
     .gte('closed_at', from)
 

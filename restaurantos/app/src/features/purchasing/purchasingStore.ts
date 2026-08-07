@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { currentBranchId } from '../auth/authStore'
 import { useAccountsStore } from '../accounts/accountsStore'
 import { useInventoryStore } from '../inventory/inventoryStore'
 import type { Supplier, PurchaseRecord, PurchaseLine, PurchaseCategory } from './types'
@@ -57,12 +57,12 @@ function mapPurchase(row: any, paidAmounts: Record<string, number>): PurchaseRec
 
 async function loadPurchasing(): Promise<{ suppliers: Supplier[]; purchases: PurchaseRecord[] }> {
   const [{ data: suppliers, error: supErr }, { data: purchases, error: purErr }, { data: payments, error: payErr }] = await Promise.all([
-    supabase.from('suppliers').select('*').eq('branch_id', CURRENT_BRANCH_ID),
-    supabase.from('purchases').select('*, purchase_lines ( * )').eq('branch_id', CURRENT_BRANCH_ID).order('created_at', { ascending: false }),
+    supabase.from('suppliers').select('*').eq('branch_id', currentBranchId()),
+    supabase.from('purchases').select('*, purchase_lines ( * )').eq('branch_id', currentBranchId()).order('created_at', { ascending: false }),
     supabase
       .from('purchase_payments')
       .select('purchase_id, amount, payment_methods ( key ), purchases!inner ( branch_id )')
-      .eq('purchases.branch_id', CURRENT_BRANCH_ID),
+      .eq('purchases.branch_id', currentBranchId()),
   ])
   if (supErr) console.error('[purchasingStore] failed to load suppliers', supErr)
   if (purErr) console.error('[purchasingStore] failed to load purchases', purErr)
@@ -100,11 +100,11 @@ export const usePurchasingStore = create<PurchasingState>((set, get) => ({
     })
 
     supabase
-      .channel(`purchasing:${CURRENT_BRANCH_ID}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` }, () =>
+      .channel(`purchasing:${currentBranchId()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers', filter: `branch_id=eq.${currentBranchId()}` }, () =>
         loadPurchasing().then((data) => set(data))
       )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` }, () =>
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases', filter: `branch_id=eq.${currentBranchId()}` }, () =>
         loadPurchasing().then((data) => set(data))
       )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_lines' }, () => loadPurchasing().then((data) => set(data)))
@@ -115,7 +115,7 @@ export const usePurchasingStore = create<PurchasingState>((set, get) => ({
   addSupplier: async (name, phone) => {
     const { data, error } = await supabase
       .from('suppliers')
-      .insert({ branch_id: CURRENT_BRANCH_ID, name, phone: phone ?? null })
+      .insert({ branch_id: currentBranchId(), name, phone: phone ?? null })
       .select()
       .single()
     if (error || !data) {
@@ -142,7 +142,7 @@ export const usePurchasingStore = create<PurchasingState>((set, get) => ({
     const { data: purchase, error } = await supabase
       .from('purchases')
       .insert({
-        branch_id: CURRENT_BRANCH_ID,
+        branch_id: currentBranchId(),
         supplier_id: input.supplierId ?? null,
         category: input.category,
         status: input.received ? 'received' : 'ordered',

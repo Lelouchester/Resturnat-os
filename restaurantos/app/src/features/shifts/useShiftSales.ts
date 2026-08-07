@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { currentBranchId } from '../auth/authStore'
 
 export interface MethodLedger {
   revenue: number
@@ -34,7 +34,7 @@ export function useShiftLedger(shiftId: string | undefined, openedAt: string | u
       supabase
         .from('ledger_entries')
         .select('amount, reason, order_id, accounts!inner ( branch_id, payment_methods ( key ) )')
-        .eq('accounts.branch_id', CURRENT_BRANCH_ID)
+        .eq('accounts.branch_id', currentBranchId())
         .gte('created_at', openedAt),
       supabase.from('orders').select('total').eq('shift_id', shiftId).eq('status', 'paid'),
     ])

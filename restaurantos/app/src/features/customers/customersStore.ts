@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { currentBranchId } from '../auth/authStore'
 import { useAccountsStore } from '../accounts/accountsStore'
 import type { Customer } from './types'
 
@@ -39,8 +39,8 @@ function mapRow(row: any, visitCounts: Map<string, number>): Customer {
 
 async function loadCustomers(): Promise<Customer[]> {
   const [{ data: customers, error: custErr }, { data: paidOrders, error: ordErr }] = await Promise.all([
-    supabase.from('customers').select('*').eq('branch_id', CURRENT_BRANCH_ID),
-    supabase.from('orders').select('customer_id').eq('branch_id', CURRENT_BRANCH_ID).eq('status', 'paid').not('customer_id', 'is', null),
+    supabase.from('customers').select('*').eq('branch_id', currentBranchId()),
+    supabase.from('orders').select('customer_id').eq('branch_id', currentBranchId()).eq('status', 'paid').not('customer_id', 'is', null),
   ])
   if (custErr) console.error('[customersStore] failed to load customers', custErr)
   if (ordErr) console.error('[customersStore] failed to load visit counts', ordErr)
@@ -70,13 +70,13 @@ export const useCustomersStore = create<CustomersState>((set, get) => ({
     })
 
     supabase
-      .channel(`customers:${CURRENT_BRANCH_ID}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'customers', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` }, () =>
+      .channel(`customers:${currentBranchId()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'customers', filter: `branch_id=eq.${currentBranchId()}` }, () =>
         loadCustomers().then((customers) => set({ customers }))
       )
       // A newly-paid order changes someone's visit count — cheap enough to
       // just reload the whole list rather than track this incrementally.
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` }, () =>
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `branch_id=eq.${currentBranchId()}` }, () =>
         loadCustomers().then((customers) => set({ customers }))
       )
       .subscribe()
@@ -85,7 +85,7 @@ export const useCustomersStore = create<CustomersState>((set, get) => ({
   addCustomer: async (name, phone) => {
     const { data, error } = await supabase
       .from('customers')
-      .insert({ branch_id: CURRENT_BRANCH_ID, name: name ?? null, phone: phone ?? null })
+      .insert({ branch_id: currentBranchId(), name: name ?? null, phone: phone ?? null })
       .select()
       .single()
     if (error || !data) {

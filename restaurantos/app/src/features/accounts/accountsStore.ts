@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { currentBranchId } from '../auth/authStore'
 import { useSettingsStore } from '../settings/settingsStore'
 
 /**
@@ -51,7 +51,7 @@ async function loadBalances(): Promise<{ balances: Record<string, number>; accou
   const { data, error } = await supabase
     .from('accounts')
     .select('id, balance, payment_methods ( key )')
-    .eq('branch_id', CURRENT_BRANCH_ID)
+    .eq('branch_id', currentBranchId())
 
   if (error) {
     console.error('[accountsStore] failed to load balances', error)
@@ -79,7 +79,7 @@ async function loadTransfers(): Promise<TransferRow[]> {
          to:accounts!account_transfers_to_account_id_fkey ( payment_methods ( key, label ) ),
          staff ( name )`
       )
-      .eq('branch_id', CURRENT_BRANCH_ID)
+      .eq('branch_id', currentBranchId())
       .order('created_at', { ascending: false }),
     // Balance corrections (adjustBalance) write a single ledger_entries row
     // rather than a paired account_transfers row — pull those in too so
@@ -87,7 +87,7 @@ async function loadTransfers(): Promise<TransferRow[]> {
     supabase
       .from('ledger_entries')
       .select(`id, amount, reason, created_at, accounts!inner ( branch_id, payment_methods ( key, label ) ), staff ( name )`)
-      .eq('accounts.branch_id', CURRENT_BRANCH_ID)
+      .eq('accounts.branch_id', currentBranchId())
       .ilike('reason', 'Balance adjustment%')
       .order('created_at', { ascending: false }),
   ])
@@ -137,7 +137,7 @@ async function moveBalance(key: string, delta: number, reason: string, orderId?:
   const { data: account, error: fetchErr } = await supabase
     .from('accounts')
     .select('id')
-    .eq('branch_id', CURRENT_BRANCH_ID)
+    .eq('branch_id', currentBranchId())
     .eq('payment_method_id', methodId)
     .maybeSingle()
 
@@ -172,19 +172,19 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
     loadTransfers().then((transfers) => set({ transfers, transfersLoading: false }))
 
     supabase
-      .channel(`accounts:${CURRENT_BRANCH_ID}`)
+      .channel(`accounts:${currentBranchId()}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'accounts', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` },
+        { event: '*', schema: 'public', table: 'accounts', filter: `branch_id=eq.${currentBranchId()}` },
         () => loadBalances().then(({ balances, accountIds }) => set({ balances, accountIds }))
       )
       .subscribe()
 
     supabase
-      .channel(`account_transfers:${CURRENT_BRANCH_ID}`)
+      .channel(`account_transfers:${currentBranchId()}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'account_transfers', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` },
+        { event: '*', schema: 'public', table: 'account_transfers', filter: `branch_id=eq.${currentBranchId()}` },
         () => loadTransfers().then((transfers) => set({ transfers }))
       )
       .subscribe()

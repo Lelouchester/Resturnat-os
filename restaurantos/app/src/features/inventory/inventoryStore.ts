@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { currentBranchId } from '../auth/authStore'
 import type { InventoryItem, StockMovement, MovementType } from './types'
 
 /**
@@ -48,11 +48,11 @@ function mapMovement(row: any): StockMovement {
 
 async function loadInventory(): Promise<{ items: InventoryItem[]; movements: StockMovement[] }> {
   const [{ data: items, error: itemsErr }, { data: movements, error: movErr }] = await Promise.all([
-    supabase.from('inventory_items').select('*').eq('branch_id', CURRENT_BRANCH_ID).eq('is_archived', false),
+    supabase.from('inventory_items').select('*').eq('branch_id', currentBranchId()).eq('is_archived', false),
     supabase
       .from('stock_movements')
       .select('*, inventory_items!inner ( branch_id )')
-      .eq('inventory_items.branch_id', CURRENT_BRANCH_ID)
+      .eq('inventory_items.branch_id', currentBranchId())
       .order('created_at', { ascending: false })
       .limit(50),
   ])
@@ -96,8 +96,8 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
     })
 
     supabase
-      .channel(`inventory:${CURRENT_BRANCH_ID}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_items', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` }, () =>
+      .channel(`inventory:${currentBranchId()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_items', filter: `branch_id=eq.${currentBranchId()}` }, () =>
         loadInventory().then((data) => set(data))
       )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_movements' }, () =>
@@ -109,7 +109,7 @@ export const useInventoryStore = create<InventoryState>((set, get) => ({
   addItem: async (name, unit, minStock, barcode) => {
     const { data, error } = await supabase
       .from('inventory_items')
-      .insert({ branch_id: CURRENT_BRANCH_ID, name, unit, min_stock: minStock, barcode: barcode ?? null })
+      .insert({ branch_id: currentBranchId(), name, unit, min_stock: minStock, barcode: barcode ?? null })
       .select()
       .single()
     if (error || !data) {

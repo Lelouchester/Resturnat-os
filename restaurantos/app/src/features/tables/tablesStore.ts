@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { CURRENT_BRANCH_ID } from '../../shared/lib/config'
+import { currentBranchId } from '../auth/authStore'
 import type { RestaurantTable } from './types'
 
 /**
@@ -59,7 +59,7 @@ export const useTablesStore = create<TablesState>((set, get) => ({
       const { data, error } = await supabase
         .from('restaurant_tables')
         .select('*')
-        .eq('branch_id', CURRENT_BRANCH_ID)
+        .eq('branch_id', currentBranchId())
         .eq('is_archived', false)
 
       if (error) {
@@ -80,10 +80,10 @@ export const useTablesStore = create<TablesState>((set, get) => ({
     })
 
     supabase
-      .channel(`tables:${CURRENT_BRANCH_ID}`)
+      .channel(`tables:${currentBranchId()}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'restaurant_tables', filter: `branch_id=eq.${CURRENT_BRANCH_ID}` },
+        { event: '*', schema: 'public', table: 'restaurant_tables', filter: `branch_id=eq.${currentBranchId()}` },
         (payload) => {
           set((state) => {
             if (payload.eventType === 'DELETE' || (payload.new as any)?.is_archived) {
@@ -151,7 +151,7 @@ export const useTablesStore = create<TablesState>((set, get) => ({
     }
     const { error } = await supabase
       .from('restaurant_tables')
-      .insert({ branch_id: CURRENT_BRANCH_ID, label, seats, type, status: 'available' })
+      .insert({ branch_id: currentBranchId(), label, seats, type, status: 'available' })
     if (error) {
       console.error('[tablesStore] addTable failed', error)
       return { ok: false, error: 'Something went wrong adding this table.' }
