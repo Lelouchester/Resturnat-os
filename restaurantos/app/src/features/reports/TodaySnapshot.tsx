@@ -35,8 +35,8 @@ export function TodaySnapshot() {
           seconds should walk away with. */}
       <Card className="p-6 text-center bg-ink text-paper">
         <div className="text-xs uppercase tracking-wider text-paper/50 mb-1">Today's sales</div>
-        <div className="font-ticket text-4xl font-bold">Rs. {data.totalRevenue.toLocaleString()}</div>
-        <div className="text-xs text-paper/40 mt-1">
+        <div className="font-ticket text-4xl font-bold text-ember">Rs. {data.totalRevenue.toLocaleString()}</div>
+        <div className="text-xs text-paper/50 mt-1">
           {data.orderCount} order{data.orderCount === 1 ? '' : 's'} · Rs. {avgOrderValue.toLocaleString()} average
         </div>
       </Card>
@@ -93,6 +93,32 @@ export function TodaySnapshot() {
               {lowStockCount} inventory item{lowStockCount === 1 ? '' : 's'} at or below its low-stock level
             </div>
           )}
+
+          {/* Every order today — table, time, what they had, what they paid */}
+          <Card className="p-4">
+            <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-3">Today's orders</div>
+            <div className="space-y-3">
+              {data.orderDetails.map((o) => (
+                <div key={o.id} className="flex items-start justify-between gap-3 pb-3 border-b border-ink/5 last:border-0 last:pb-0">
+                  <div className="min-w-0">
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-ticket font-bold">{o.tableLabel}</span>
+                      <span className="text-xs text-ink/40">
+                        {new Date(o.closedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <div className="text-xs text-ink/50 truncate">
+                      {o.items.map((i) => (i.qty > 1 ? `${i.qty}× ${i.name}` : i.name)).join(', ')}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="font-ticket font-semibold">Rs. {o.total.toLocaleString()}</div>
+                    <div className="text-[11px] text-ink/40">{o.paidVia.join(', ') || '—'}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
         </>
       )}
     </div>

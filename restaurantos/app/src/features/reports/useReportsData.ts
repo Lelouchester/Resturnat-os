@@ -14,6 +14,14 @@ export interface ReportsData {
   kitchenPerformance: { avgPrepMinutes: number; onTimePct: number }
   totalRevenue: number
   orderCount: number
+  orderDetails: {
+    id: string
+    tableLabel: string
+    closedAt: string
+    items: { name: string; qty: number }[]
+    total: number
+    paidVia: string[]
+  }[]
 }
 
 const METHOD_COLOR: Record<string, string> = {
@@ -33,6 +41,7 @@ const EMPTY: ReportsData = {
   kitchenPerformance: { avgPrepMinutes: 0, onTimePct: 0 },
   totalRevenue: 0,
   orderCount: 0,
+  orderDetails: [],
 }
 
 function rangeStart(range: ReportRange): Date {
@@ -150,6 +159,25 @@ async function loadReports(range: ReportRange): Promise<ReportsData> {
   const avgPrepMinutes = prepTimes.length > 0 ? Math.round(prepTimes.reduce((s, m) => s + m, 0) / prepTimes.length) : 0
   const onTimePct = prepTimes.length > 0 ? Math.round((prepTimes.filter((m) => m <= 15).length / prepTimes.length) * 100) : 0
 
+  const orderDetails = orders
+    .map((o: any) => ({
+      id: o.id,
+      tableLabel: o.restaurant_tables?.label ?? 'Unknown',
+      closedAt: o.closed_at,
+      items: Object.values(
+        (o.order_items ?? [])
+          .filter((item: any) => item.status !== 'void')
+          .reduce((acc: Record<string, { name: string; qty: number }>, item: any) => {
+            const name = item.custom_name ?? item.menu_items?.name ?? 'Item'
+            acc[name] = acc[name] ? { name, qty: acc[name].qty + item.quantity } : { name, qty: item.quantity }
+            return acc
+          }, {})
+      ) as { name: string; qty: number }[],
+      total: Number(o.total),
+      paidVia: (o.payments ?? []).map((p: any) => p.payment_methods?.label ?? 'Other'),
+    }))
+    .sort((a, b) => new Date(b.closedAt).getTime() - new Date(a.closedAt).getTime())
+
   return {
     revenueTrend,
     topItems,
@@ -160,6 +188,7 @@ async function loadReports(range: ReportRange): Promise<ReportsData> {
     kitchenPerformance: { avgPrepMinutes, onTimePct },
     totalRevenue: orders.reduce((s, o) => s + Number(o.total), 0),
     orderCount: orders.length,
+    orderDetails,
   }
 }
 
