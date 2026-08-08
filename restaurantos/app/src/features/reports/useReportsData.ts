@@ -13,6 +13,7 @@ export interface ReportsData {
   tableTurnover: { table: string; avgMinutes: number; turns: number }[]
   kitchenPerformance: { avgPrepMinutes: number; onTimePct: number }
   totalRevenue: number
+  orderCount: number
 }
 
 const METHOD_COLOR: Record<string, string> = {
@@ -31,6 +32,7 @@ const EMPTY: ReportsData = {
   tableTurnover: [],
   kitchenPerformance: { avgPrepMinutes: 0, onTimePct: 0 },
   totalRevenue: 0,
+  orderCount: 0,
 }
 
 function rangeStart(range: ReportRange): Date {
@@ -157,6 +159,7 @@ async function loadReports(range: ReportRange): Promise<ReportsData> {
     tableTurnover,
     kitchenPerformance: { avgPrepMinutes, onTimePct },
     totalRevenue: orders.reduce((s, o) => s + Number(o.total), 0),
+    orderCount: orders.length,
   }
 }
 
