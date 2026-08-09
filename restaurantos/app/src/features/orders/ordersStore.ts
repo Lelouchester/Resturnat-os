@@ -35,6 +35,7 @@ interface OrdersState {
   updateItemStatus: (itemId: string, status: OrderItemStatus) => Promise<void>
   markItemsServed: (itemIds: string[]) => Promise<void>
   voidItem: (itemId: string, reason: string) => Promise<void>
+  cancelOrder: (tableId: string, reason: string) => Promise<void>
   beginBilling: (tableId: string) => Promise<void>
   attachCustomer: (tableId: string, customerId: string) => Promise<void>
   transferOrderTable: (fromTableId: string, toTableId: string) => Promise<void>
@@ -267,6 +268,57 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     }
   },
 
+  // For a table's whole order before it's ever billed — wrong table, guest
+  // walked out, order entered by mistake. Voids every item (restoring any
+  // tracked inventory, same as voiding one item does), closes the order out
+  // as cancelled instead of leaving it lingering as "open" with nothing in
+  // it, and frees the table completely — this is meant to be a clean slate,
+  // not something that needs cleanup afterward.
+  cancelOrder: async (tableId, reason) => {
+    const order = get().getOrderForTable(tableId)
+    if (!order) return
+
+    const { data: items, error: fetchErr } = await supabase
+      .from('order_items')
+      .select('id, menu_item_id, quantity')
+      .eq('order_id', order.id)
+      .neq('status', 'void')
+    if (fetchErr) console.error('[ordersStore] cancelOrder: failed to look up items', fetchErr)
+
+    const { error: voidErr } = await supabase
+      .from('order_items')
+      .update({ status: 'void', void_reason: reason, status_updated_at: new Date().toISOString() })
+      .eq('order_id', order.id)
+      .neq('status', 'void')
+    if (voidErr) {
+      console.error('[ordersStore] cancelOrder: voiding items failed', voidErr)
+      return
+    }
+
+    const menuItems = useMenuStore.getState().items
+    for (const item of items ?? []) {
+      if (!item.menu_item_id) continue
+      const menuItem = menuItems.find((m) => m.id === item.menu_item_id)
+      if (menuItem?.trackedInventoryItemId) {
+        useInventoryStore.getState().adjustStock(menuItem.trackedInventoryItemId, item.quantity, 'sale_deduction', `Order cancelled: ${reason}`)
+      }
+    }
+
+    const { error: orderErr } = await supabase
+      .from('orders')
+      .update({ status: 'cancelled', closed_at: new Date().toISOString() })
+      .eq('id', order.id)
+    if (orderErr) console.error('[ordersStore] cancelOrder: closing order failed', orderErr)
+
+    const { error: tableErr } = await supabase
+      .from('restaurant_tables')
+      .update({ status: 'needs_cleaning', customer_name: null, guest_count: null, seated_at: null, note: null })
+      .eq('id', tableId)
+    if (tableErr) console.error('[ordersStore] cancelOrder: freeing table failed', tableErr)
+
+    set({ orders: await loadOpenOrders() })
+  },
+
   // Marks a table (and its order) as actively being closed out — lets the
   // floor plan and kitchen both show "billing" instead of "occupied".
   beginBilling: async (tableId) => {
@@ -317,7 +369,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
 
     await supabase
       .from('restaurant_tables')
-      .update({ status: 'needs_cleaning', customer_name: null, guest_count: null, seated_at: null })
+      .update({ status: 'needs_cleaning', customer_name: null, guest_count: null, seated_at: null, note: null })
       .eq('id', fromTableId)
 
     set({ orders: await loadOpenOrders() })
@@ -410,7 +462,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     if (tableIds.length > 0) {
       const { error: tableErr } = await supabase
         .from('restaurant_tables')
-        .update({ status: 'needs_cleaning', customer_name: null, guest_count: null, seated_at: null })
+        .update({ status: 'needs_cleaning', customer_name: null, guest_count: null, seated_at: null, note: null })
         .in('id', tableIds)
       if (tableErr) console.error('[ordersStore] completePayment: freeing tables failed', tableErr)
     }

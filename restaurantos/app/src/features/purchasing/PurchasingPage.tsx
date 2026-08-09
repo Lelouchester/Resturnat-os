@@ -178,7 +178,17 @@ export function PurchasingPage() {
 
       {/* Purchase history */}
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-        <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40">Purchase history</div>
+        <div>
+          <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40">Purchase history</div>
+          {purchasesInRange.length > 0 && (
+            <div className="font-ticket text-lg font-bold mt-0.5">
+              Rs. {purchasesInRange.reduce((sum, p) => sum + p.lines.reduce((s, l) => s + l.quantity * l.unitCost, 0), 0).toLocaleString()}
+              <span className="text-xs font-normal text-ink/40 ml-1.5">
+                {search ? 'matching' : historyFrom === historyTo ? (historyFrom === new Date().toISOString().slice(0, 10) ? 'today' : historyFrom) : `${historyFrom} – ${historyTo}`}
+              </span>
+            </div>
+          )}
+        </div>
         <div className="flex items-end gap-2 flex-wrap">
           <input
             value={search}

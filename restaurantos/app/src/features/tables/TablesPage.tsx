@@ -8,6 +8,7 @@ import { useTablesStore } from './tablesStore'
 import { useOrdersStore } from '../orders/ordersStore'
 import { CustomerAssignField } from '../customers/CustomerAssignField'
 import { useReservationsStore } from '../reservations/reservationsStore'
+import type { RestaurantTable } from './types'
 
 const FILTERS = ['All', 'Available', 'Occupied', 'Reserved', 'Billing'] as const
 
@@ -17,6 +18,7 @@ export function TablesPage() {
   const [transferringId, setTransferringId] = useState<string | null>(null)
   const [mergingId, setMergingId] = useState<string | null>(null)
   const [assigningCustomerId, setAssigningCustomerId] = useState<string | null>(null)
+  const [editingDetailsId, setEditingDetailsId] = useState<string | null>(null)
   const [addingTable, setAddingTable] = useState(false)
   const navigate = useNavigate()
 
@@ -24,6 +26,7 @@ export function TablesPage() {
   const loading = useTablesStore((s) => s.loading)
   const init = useTablesStore((s) => s.init)
   const addTable = useTablesStore((s) => s.addTable)
+  const updateTableDetails = useTablesStore((s) => s.updateTableDetails)
   const markCleaned = useTablesStore((s) => s.markCleaned)
   const archiveTable = useTablesStore((s) => s.archiveTable)
   const [removingId, setRemovingId] = useState<string | null>(null)
@@ -47,11 +50,29 @@ export function TablesPage() {
   const totalsByTable = useMemo(() => {
     const map = new Map<string, number>()
     for (const o of orders) {
+      // A merged-away order's total is already part of the table it merged
+      // into — counting it here too would show the same money twice on
+      // the floor plan, which is exactly the kind of thing that leads to
+      // confusion about what's actually still owed where.
+      if (o.mergedIntoOrderId) continue
       const sum = o.items.filter((i) => i.status !== 'void').reduce((s, i) => s + (i.isComplimentary ? 0 : i.unitPrice * i.quantity), 0)
       map.set(o.tableId, (map.get(o.tableId) ?? 0) + sum)
     }
     return map
   }, [orders])
+
+  // For the "merged into Table X" badge — maps a merged-away table's id to
+  // the label of the table its bill now lives on.
+  const mergedIntoLabel = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const o of orders) {
+      if (!o.mergedIntoOrderId) continue
+      const target = orders.find((t) => t.id === o.mergedIntoOrderId)
+      const targetTable = target ? tables.find((tb) => tb.id === target.tableId) : null
+      if (targetTable) map.set(o.tableId, targetTable.label)
+    }
+    return map
+  }, [orders, tables])
 
   useEffect(() => {
     init()
@@ -145,7 +166,9 @@ export function TablesPage() {
                   onAssignCustomer={setAssigningCustomerId}
                   onMarkCleaned={markCleaned}
                   onRemove={setRemovingId}
+                  onEdit={setEditingDetailsId}
                   runningTotal={totalsByTable.get(t.id)}
+                  mergedIntoLabel={mergedIntoLabel.get(t.id)}
                 />
               ))
             )}
@@ -228,6 +251,18 @@ export function TablesPage() {
       {addingTable && (
         <AddTableModal onClose={() => setAddingTable(false)} onAdd={(label, seats) => addTable(label, seats)} />
       )}
+
+      {editingDetailsId && (() => {
+        const t = tables.find((tt) => tt.id === editingDetailsId)
+        if (!t) return null
+        return (
+          <EditTableDetailsModal
+            table={t}
+            onSave={(details) => { updateTableDetails(t.id, details); setEditingDetailsId(null) }}
+            onClose={() => setEditingDetailsId(null)}
+          />
+        )
+      })()}
     </div>
   )
 }
@@ -366,6 +401,54 @@ function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label:
         />
         <Button className="w-full" disabled={!label.trim()} onClick={handleAdd}>
           Add table
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function EditTableDetailsModal({
+  table,
+  onSave,
+  onClose,
+}: {
+  table: RestaurantTable
+  onSave: (details: { nickname?: string; note?: string }) => void
+  onClose: () => void
+}) {
+  const [nickname, setNickname] = useState(table.nickname ?? '')
+  const [note, setNote] = useState(table.note ?? '')
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-ticket text-lg font-bold">{table.label}</h2>
+          <button onClick={onClose} className="text-ink/40"><X size={20} /></button>
+        </div>
+
+        <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Nickname (optional)</label>
+        <input
+          autoFocus
+          value={nickname}
+          onChange={(e) => setNickname(e.target.value)}
+          placeholder="e.g. Near window"
+          className="w-full mb-1 text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
+        />
+        <p className="text-[11px] text-ink/40 mb-4">Shown under the table name, just for your own reference. Doesn't change anything on receipts or kitchen tickets.</p>
+
+        <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Note (optional)</label>
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="e.g. Came from Table 3"
+          className="w-full mb-1 text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
+        />
+        <p className="text-[11px] text-ink/40 mb-5">Clears on its own once this table's current party leaves — not permanent like the nickname above.</p>
+
+        <Button className="w-full" onClick={() => onSave({ nickname, note })}>
+          Save
         </Button>
       </div>
     </div>

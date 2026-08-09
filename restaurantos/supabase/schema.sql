@@ -160,7 +160,8 @@ create table permissions (
 create table restaurant_tables (
   id uuid primary key default uuid_generate_v4(),
   branch_id uuid references branches(id) on delete cascade,
-  label text not null, -- "Table 1", "Patio 3"
+  label text not null, -- "Table 1", "Patio 3" — the fixed system identifier, used everywhere internally
+  nickname text, -- optional, persistent — "Near window", shown alongside the label, purely for staff's own reference
   seats integer default 4,
   status table_status not null default 'available',
   customer_name text,
@@ -169,6 +170,7 @@ create table restaurant_tables (
   guest_count integer,
   waiter_id uuid references staff(id),
   seated_at timestamptz,
+  note text, -- optional, transient — e.g. "came from Table 3" — cleared automatically whenever the table's current party leaves, same lifecycle as customer_name/guest_count/seated_at
   position_x integer, -- for the floor-plan grid layout
   position_y integer,
   is_archived boolean not null default false, -- "deleted" tables are archived, not hard-deleted — orders/reservations still reference them for real history

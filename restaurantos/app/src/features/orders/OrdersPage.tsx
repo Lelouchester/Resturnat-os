@@ -17,6 +17,8 @@ export function OrdersPage() {
   const [activeCategory, setActiveCategory] = useState<string>('favorites')
   const [search, setSearch] = useState('')
   const [cartOpen, setCartOpen] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
   const [toast, setToast] = useState<string | null>(null)
   const cart = useCart()
   const shift = useShiftStore((s) => s.shift)
@@ -38,6 +40,8 @@ export function OrdersPage() {
   const orders = useOrdersStore((s) => s.orders)
   const initOrders = useOrdersStore((s) => s.init)
   const sendItemsToKitchen = useOrdersStore((s) => s.sendItemsToKitchen)
+  const voidItem = useOrdersStore((s) => s.voidItem)
+  const cancelOrder = useOrdersStore((s) => s.cancelOrder)
 
   useEffect(() => {
     initMenu()
@@ -175,14 +179,21 @@ export function OrdersPage() {
               </span>
             )}
           </div>
-          {existingBillable.length > 0 && (
-            <button
-              onClick={() => navigate(`/billing?table=${activeTable}`)}
-              className="text-xs font-semibold text-ember"
-            >
-              Go to Billing →
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {existingBillable.length > 0 && (
+              <button onClick={() => setCancelling(true)} className="text-xs font-semibold text-ink/40 hover:text-status-cleaning">
+                Cancel order
+              </button>
+            )}
+            {existingBillable.length > 0 && (
+              <button
+                onClick={() => navigate(`/billing?table=${activeTable}`)}
+                className="text-xs font-semibold text-ember"
+              >
+                Go to Billing →
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Always-visible summary of what's already confirmed for this table — stays
@@ -290,7 +301,8 @@ export function OrdersPage() {
       <CartPanel
         lines={cart.lines}
         subtotal={cart.subtotal}
-        existingItems={existingBillable}
+        existingItems={existingOrder?.items ?? []}
+        onVoidExisting={(itemId, reason) => voidItem(itemId, reason)}
         onAdjust={cart.adjustQuantity}
         onNote={cart.setNote}
         onRemove={cart.removeLine}
@@ -322,6 +334,43 @@ export function OrdersPage() {
         <div className="fixed bottom-24 md:bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-ink text-paper px-4 py-2.5 rounded-full text-sm font-semibold shadow-lg">
           <Check size={15} className="text-status-available" />
           {toast}
+        </div>
+      )}
+
+      {cancelling && (
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setCancelling(false)} />
+          <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+            <h2 className="font-ticket text-lg font-bold mb-2">Cancel this order?</h2>
+            <p className="text-xs text-ink/50 mb-4">
+              Every item for {activeTableRow?.label} gets voided, any tracked inventory used gets put back, and the table frees up completely. This can't be undone.
+            </p>
+            <input
+              autoFocus
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Reason (e.g. wrong table, guest left)"
+              className="w-full mb-4 text-sm rounded-xl border border-ink/10 px-3 py-2.5 outline-none focus:border-status-cleaning"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setCancelling(false); setCancelReason('') }}
+                className="flex-1 rounded-xl border border-ink/10 py-2.5 text-sm font-semibold"
+              >
+                Never mind
+              </button>
+              <button
+                onClick={async () => {
+                  await cancelOrder(activeTable, cancelReason.trim() || 'No reason given')
+                  setCancelling(false)
+                  setCancelReason('')
+                }}
+                className="flex-1 rounded-xl bg-status-cleaning text-white py-2.5 text-sm font-semibold"
+              >
+                Cancel order
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

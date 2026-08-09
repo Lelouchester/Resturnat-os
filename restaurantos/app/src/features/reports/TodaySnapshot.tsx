@@ -1,8 +1,9 @@
 import { useReportsData } from './useReportsData'
 import { Card } from '../../shared/ui/Card'
 import { useInventoryStore } from '../inventory/inventoryStore'
+import { usePurchasingStore } from '../purchasing/purchasingStore'
 import { AlertTriangle } from 'lucide-react'
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 
 // Deliberately simple — this is for someone who wants the headline numbers
 // in ten seconds, not someone digging into trends. That's what the
@@ -12,7 +13,20 @@ import { useMemo } from 'react'
 export function TodaySnapshot() {
   const { data, loading } = useReportsData('Today')
   const inventoryItems = useInventoryStore((s) => s.items)
+  const purchases = usePurchasingStore((s) => s.purchases)
+  const initPurchasing = usePurchasingStore((s) => s.init)
   const lowStockCount = useMemo(() => inventoryItems.filter((i) => i.currentStock <= i.minStock).length, [inventoryItems])
+
+  useEffect(() => {
+    initPurchasing()
+  }, [initPurchasing])
+
+  const todayStr = new Date().toDateString()
+  const purchasesToday = useMemo(
+    () => purchases.filter((p) => new Date(p.createdAt).toDateString() === todayStr),
+    [purchases, todayStr]
+  )
+  const purchasesTotal = purchasesToday.reduce((sum, p) => sum + p.lines.reduce((s, l) => s + l.quantity * l.unitCost, 0), 0)
 
   const avgOrderValue = data.orderCount > 0 ? Math.round(data.totalRevenue / data.orderCount) : 0
   const totalPayments = data.paymentSplit.reduce((s, p) => s + p.value, 0)
@@ -40,6 +54,13 @@ export function TodaySnapshot() {
           {data.orderCount} order{data.orderCount === 1 ? '' : 's'} · Rs. {avgOrderValue.toLocaleString()} average
         </div>
       </Card>
+
+      {purchasesToday.length > 0 && (
+        <Card className="p-3 flex items-center justify-between">
+          <span className="text-xs font-semibold text-ink/50">Purchases today</span>
+          <span className="font-ticket font-bold">Rs. {purchasesTotal.toLocaleString()}</span>
+        </Card>
+      )}
 
       {data.totalRevenue === 0 ? (
         <p className="text-sm text-ink/30 italic py-10 text-center border border-dashed border-ink/10 rounded-2xl">

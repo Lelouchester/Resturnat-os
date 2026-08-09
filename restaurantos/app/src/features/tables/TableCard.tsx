@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Users, ArrowRightLeft, Merge, SprayCan, UserPlus, Trash2 } from 'lucide-react'
+import { Users, ArrowRightLeft, Merge, SprayCan, UserPlus, Trash2, Pencil } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { StatusPill } from '../../shared/ui/StatusPill'
 import type { TableStatus } from '../../shared/ui/StatusPill'
@@ -37,6 +37,8 @@ export function TableCard({
   onMarkCleaned,
   onAssignCustomer,
   onRemove,
+  onEdit,
+  mergedIntoLabel,
   runningTotal,
 }: {
   table: RestaurantTable
@@ -46,6 +48,8 @@ export function TableCard({
   onMarkCleaned?: (id: string) => void
   onAssignCustomer?: (id: string) => void
   onRemove?: (id: string) => void
+  onEdit?: (id: string) => void
+  mergedIntoLabel?: string
   runningTotal?: number
 }) {
   const minutes = useElapsedMinutes(table.seatedAt)
@@ -64,8 +68,25 @@ export function TableCard({
       }`}
     >
       <div className="flex items-start justify-between">
-        <div className="font-ticket text-2xl font-bold tracking-tight">{table.label}</div>
-        <div className="flex items-center gap-1.5">
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-1.5">
+            <span className="font-ticket text-2xl font-bold tracking-tight">{table.label}</span>
+            {onEdit && (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); onEdit(table.id) }}
+                onKeyDown={(e) => e.key === 'Enter' && (e.stopPropagation(), onEdit(table.id))}
+                className="text-ink/20 hover:text-ink shrink-0"
+                title="Edit nickname / note"
+              >
+                <Pencil size={12} />
+              </span>
+            )}
+          </div>
+          {table.nickname && <div className="text-xs text-ink/40 truncate">{table.nickname}</div>}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
           <StatusPill status={table.status} />
           {showRemoveAction && (
             <span
@@ -82,8 +103,17 @@ export function TableCard({
         </div>
       </div>
 
+      {mergedIntoLabel && (
+        <div className="mt-2 flex items-center gap-1 text-xs font-semibold text-ember bg-ember/10 rounded-lg px-2 py-1 w-fit">
+          <Merge size={12} /> Billed with {mergedIntoLabel}
+        </div>
+      )}
+
       {table.customerName && (
         <div className="mt-2 text-sm font-medium text-ink/80 truncate">{table.customerName}</div>
+      )}
+      {table.note && (
+        <div className="mt-1 text-xs italic text-ink/40 truncate">{table.note}</div>
       )}
 
       <div className="mt-3 flex items-center justify-between text-xs text-ink/50">

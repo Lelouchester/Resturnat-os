@@ -23,12 +23,14 @@ interface TablesState {
   markCleaned: (tableId: string) => Promise<void>
   addTable: (label: string, seats: number) => Promise<{ ok: boolean; error?: string }>
   archiveTable: (tableId: string) => Promise<{ ok: boolean; error?: string }>
+  updateTableDetails: (tableId: string, info: { nickname?: string; note?: string }) => Promise<void>
 }
 
 function mapRow(row: any): RestaurantTable {
   return {
     id: row.id,
     label: row.label,
+    nickname: row.nickname ?? undefined,
     seats: row.seats,
     status: row.status,
     customerName: row.customer_name ?? undefined,
@@ -36,6 +38,7 @@ function mapRow(row: any): RestaurantTable {
     customerId: row.customer_id ?? undefined,
     guestCount: row.guest_count ?? undefined,
     seatedAt: row.seated_at ?? undefined,
+    note: row.note ?? undefined,
   }
 }
 
@@ -138,6 +141,14 @@ export const useTablesStore = create<TablesState>((set, get) => ({
       .eq('id', tableId)
       .eq('status', 'needs_cleaning')
     if (error) console.error('[tablesStore] markCleaned failed', error)
+  },
+
+  updateTableDetails: async (tableId, info) => {
+    const payload: Record<string, unknown> = {}
+    if (info.nickname !== undefined) payload.nickname = info.nickname || null
+    if (info.note !== undefined) payload.note = info.note || null
+    const { error } = await supabase.from('restaurant_tables').update(payload).eq('id', tableId)
+    if (error) console.error('[tablesStore] updateTableDetails failed', error)
   },
 
   addTable: async (label, seats) => {

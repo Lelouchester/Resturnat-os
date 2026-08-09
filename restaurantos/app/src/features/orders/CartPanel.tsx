@@ -19,6 +19,7 @@ export function CartPanel({
   onNote,
   onRemove,
   onVoid,
+  onVoidExisting,
   onComplimentary,
   onConfirm,
   isOpen,
@@ -31,6 +32,7 @@ export function CartPanel({
   onNote: (key: string, note: string) => void
   onRemove: (key: string) => void
   onVoid: (key: string, reason: string) => void
+  onVoidExisting?: (itemId: string, reason: string) => void
   onComplimentary: (key: string) => void
   onConfirm: () => void
   isOpen: boolean
@@ -38,6 +40,7 @@ export function CartPanel({
 }) {
   const [noteEditKey, setNoteEditKey] = useState<string | null>(null)
   const [voidEditKey, setVoidEditKey] = useState<string | null>(null)
+  const [voidExistingKey, setVoidExistingKey] = useState<string | null>(null)
   const billableCount = lines.filter((l) => l.status !== 'void').length
 
   return (
@@ -71,9 +74,34 @@ export function CartPanel({
                 <ChefHat size={12} /> Already sent to kitchen
               </div>
               {existingItems.map((it) => (
-                <div key={it.id} className="flex items-center justify-between text-sm py-1">
-                  <span className="text-ink/70">{it.quantity}× {it.name}</span>
-                  <span className="text-[11px] font-semibold text-ink/40">{ITEM_STATUS_LABEL[it.status]}</span>
+                <div key={it.id} className={it.status === 'void' ? 'opacity-40 py-1' : 'py-1'}>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-ink/70">{it.quantity}× {it.name}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-semibold text-ink/40">{ITEM_STATUS_LABEL[it.status]}</span>
+                      {onVoidExisting && it.status !== 'void' && (
+                        <button
+                          onClick={() => setVoidExistingKey(voidExistingKey === it.id ? null : it.id)}
+                          className="text-ink/30 hover:text-status-cleaning"
+                          title="Cancel this item"
+                        >
+                          <Ban size={13} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {voidExistingKey === it.id && (
+                    <input
+                      autoFocus
+                      placeholder="Reason (e.g. sent back, made wrong)"
+                      onBlur={(e) => {
+                        if (e.target.value.trim()) onVoidExisting?.(it.id, e.target.value.trim())
+                        setVoidExistingKey(null)
+                      }}
+                      onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+                      className="mt-1 mb-1 w-full text-xs rounded-lg border border-status-cleaning/30 px-2.5 py-1.5 outline-none focus:border-status-cleaning"
+                    />
+                  )}
                 </div>
               ))}
             </div>
