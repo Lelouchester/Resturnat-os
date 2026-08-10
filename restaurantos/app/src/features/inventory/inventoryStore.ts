@@ -66,17 +66,8 @@ async function loadInventory(): Promise<{ items: InventoryItem[]; movements: Sto
 }
 
 async function bumpStock(itemId: string, delta: number, type: MovementType, note?: string) {
-  const { data: item, error: fetchErr } = await supabase.from('inventory_items').select('current_stock').eq('id', itemId).maybeSingle()
-  if (fetchErr || !item) {
-    console.error('[inventoryStore] item not found for stock update', itemId, fetchErr)
-    return
-  }
-  const nextStock = Math.max(0, Number(item.current_stock) + delta)
-  const { error: updErr } = await supabase.from('inventory_items').update({ current_stock: nextStock }).eq('id', itemId)
-  if (updErr) console.error('[inventoryStore] stock update failed', updErr)
-
-  const { error: mvErr } = await supabase.from('stock_movements').insert({ inventory_item_id: itemId, type, quantity: delta, note: note ?? null })
-  if (mvErr) console.error('[inventoryStore] movement insert failed', mvErr)
+  const { error } = await supabase.rpc('increment_stock', { p_item_id: itemId, p_delta: delta, p_type: type, p_note: note ?? null })
+  if (error) console.error('[inventoryStore] increment_stock failed', error)
 }
 
 export const useInventoryStore = create<InventoryState>((set, get) => ({

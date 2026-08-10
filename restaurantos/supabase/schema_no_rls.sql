@@ -617,6 +617,34 @@ $$;
 
 grant execute on function increment_balance(uuid, numeric, text, uuid, uuid) to authenticated;
 
+-- ----------------------------------------------------------------------------
+-- Same fix as increment_balance, for inventory stock — atomically adjusts
+-- current_stock by delta (never below 0) and logs the matching
+-- stock_movements row in one statement, instead of a client-side
+-- read-then-write with a real race window under concurrent staff.
+-- ----------------------------------------------------------------------------
+create or replace function increment_stock(p_item_id uuid, p_delta numeric, p_type text, p_note text default null)
+returns numeric
+language plpgsql security invoker as $$
+declare
+  v_new_stock numeric;
+begin
+  update inventory_items set current_stock = greatest(0, current_stock + p_delta) where id = p_item_id
+  returning current_stock into v_new_stock;
+
+  if v_new_stock is null then
+    raise exception 'inventory item not found';
+  end if;
+
+  insert into stock_movements (inventory_item_id, type, quantity, note)
+  values (p_item_id, p_type::stock_movement_type, p_delta, p_note);
+
+  return v_new_stock;
+end;
+$$;
+
+grant execute on function increment_stock(uuid, numeric, text, text) to authenticated;
+
 -- ============================================================================
 -- Row Level Security is intentionally left OFF in this version.
 -- Turn it on once real staff login is wired up — see schema.sql for the
