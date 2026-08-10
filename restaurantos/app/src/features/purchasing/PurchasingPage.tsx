@@ -466,15 +466,17 @@ function NewPurchaseModal({
                 )}
                 <input
                   type="number"
+                  min="0"
                   value={line.quantity || ''}
-                  onChange={(e) => updateLine(line.id, { quantity: Number(e.target.value) || 0 })}
+                  onChange={(e) => updateLine(line.id, { quantity: Math.max(0, Number(e.target.value) || 0) })}
                   placeholder="Qty"
                   className="w-14 text-xs font-ticket border border-ink/10 rounded-lg px-2 py-2 outline-none focus:border-ember"
                 />
                 <input
                   type="number"
+                  min="0"
                   value={line.unitCost || ''}
-                  onChange={(e) => updateLine(line.id, { unitCost: Number(e.target.value) || 0 })}
+                  onChange={(e) => updateLine(line.id, { unitCost: Math.max(0, Number(e.target.value) || 0) })}
                   placeholder="Rs."
                   className="w-20 text-xs font-ticket border border-ink/10 rounded-lg px-2 py-2 outline-none focus:border-ember"
                 />

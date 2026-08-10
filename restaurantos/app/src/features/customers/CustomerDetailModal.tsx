@@ -132,6 +132,7 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
                 <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Amount settled (Rs.)</label>
                 <input
                   type="number"
+                  min="0"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   className="w-full mb-2 text-sm font-ticket font-bold border border-ink/10 rounded-lg px-2.5 py-2 outline-none focus:border-ember"

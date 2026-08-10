@@ -23,7 +23,8 @@ export function AdjustStockModal({
   const [type, setType] = useState<MovementType>('adjustment')
   const [note, setNote] = useState('')
 
-  const delta = mode === 'add' ? Number(qty) || 0 : -(Number(qty) || 0)
+  const safeQty = Math.max(0, Number(qty) || 0)
+  const delta = mode === 'add' ? safeQty : -safeQty
   const resulting = item.currentStock + delta
 
   function handleSave() {
@@ -61,6 +62,7 @@ export function AdjustStockModal({
         <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Quantity ({item.unit})</label>
         <input
           type="number"
+          min="0"
           value={qty}
           onChange={(e) => setQty(e.target.value)}
           autoFocus

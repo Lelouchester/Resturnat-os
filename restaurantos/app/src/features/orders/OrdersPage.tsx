@@ -180,7 +180,7 @@ export function OrdersPage() {
             )}
           </div>
           <div className="flex items-center gap-3">
-            {existingBillable.length > 0 && (
+            {existingBillable.length > 0 && existingOrder?.status !== 'billing' && (
               <button onClick={() => setCancelling(true)} className="text-xs font-semibold text-ink/40 hover:text-status-cleaning">
                 Cancel order
               </button>

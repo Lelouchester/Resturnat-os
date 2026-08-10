@@ -277,6 +277,12 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
   cancelOrder: async (tableId, reason) => {
     const order = get().getOrderForTable(tableId)
     if (!order) return
+    // Once billing has started for this table (someone's actively checking
+    // it out), cancelling from here would race against that — money could
+    // get deposited for items this just voided. Cancel is only for before
+    // checkout begins; once it's started, it needs to be finished or
+    // corrected through Billing itself.
+    if (order.status === 'billing') return
 
     const { data: items, error: fetchErr } = await supabase
       .from('order_items')
@@ -427,6 +433,21 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     // withdraws from.
     for (const p of payments) {
       if (p.amount > 0) await useAccountsStore.getState().deposit(p.methodKey, p.amount, { orderId, reason: 'order payment' })
+    }
+
+    // If what came in adds up to more than the bill, that excess gets
+    // physically handed back as cash — whether the overpayment itself was
+    // cash or something else (eSewa, Fonepay). Without this, a customer
+    // paying extra by eSewa and getting cash change back would silently
+    // leave the tracked Cash balance higher than what's actually in the
+    // drawer, since the cash going *out* as change was never recorded
+    // anywhere. This assumes change is always given in cash, which is
+    // standard practice — if that's ever not true for a specific order,
+    // this would need a manual correction via Accounts > Adjust balance.
+    const totalPaid = payments.reduce((s, p) => s + p.amount, 0)
+    const changeGiven = totalPaid - params.total
+    if (changeGiven > 0) {
+      await useAccountsStore.getState().withdraw('cash', changeGiven, { reason: 'Change given to customer' })
     }
 
     const { error: closeErr } = await supabase

@@ -142,7 +142,10 @@ export function BillingPage() {
   )
   const hasExemptItems = effectiveLines.some((l) => l.excludeFromDiscount)
   const discount =
-    discountMode === 'pct' ? Math.round(discountEligibleSubtotal * (discountPct / 100)) : Math.min(discountAmount, discountEligibleSubtotal)
+    Math.max(0, Math.min(
+      discountMode === 'pct' ? Math.round(discountEligibleSubtotal * (discountPct / 100)) : discountAmount,
+      discountEligibleSubtotal
+    ))
   const afterDiscount = subtotal - discount
   const serviceCharge = Math.round(afterDiscount * (serviceChargePct / 100))
   const tax = Math.round(afterDiscount * (taxPct / 100))
@@ -451,17 +454,20 @@ export function BillingPage() {
                   {discountMode === 'pct' ? (
                     <input
                       type="number"
+                      min="0"
+                      max="100"
                       value={discountPct || ''}
                       placeholder="0"
-                      onChange={(e) => setDiscountPct(Number(e.target.value) || 0)}
+                      onChange={(e) => setDiscountPct(Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
                       className="w-16 text-sm text-right border border-ink/10 rounded-lg px-2 py-1.5 outline-none focus:border-ember font-ticket"
                     />
                   ) : (
                     <input
                       type="number"
+                      min="0"
                       value={discountAmount || ''}
                       placeholder="0"
-                      onChange={(e) => setDiscountAmount(Number(e.target.value) || 0)}
+                      onChange={(e) => setDiscountAmount(Math.max(0, Number(e.target.value) || 0))}
                       className="w-20 text-sm text-right border border-ink/10 rounded-lg px-2 py-1.5 outline-none focus:border-ember font-ticket"
                     />
                   )}
@@ -669,9 +675,10 @@ function AdjustRow({ label, value, onChange, isAmount }: { label: string; value:
         {isAmount && <span className="text-xs text-ink/40 font-ticket">Rs.</span>}
         <input
           type="number"
+          min="0"
           value={value || ''}
           placeholder="0"
-          onChange={(e) => onChange(Number(e.target.value) || 0)}
+          onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))}
           className="w-20 text-sm text-right border border-ink/10 rounded-lg px-2 py-1.5 outline-none focus:border-ember font-ticket"
         />
       </div>

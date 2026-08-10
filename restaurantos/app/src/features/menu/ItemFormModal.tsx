@@ -81,6 +81,7 @@ export function ItemFormModal({
             <Field label="Price (Rs.)">
               <input
                 type="number"
+                min="0"
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
                 className="w-full text-sm font-ticket border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
@@ -89,6 +90,7 @@ export function ItemFormModal({
             <Field label="Prep time (min)">
               <input
                 type="number"
+                min="0"
                 value={prepTime}
                 onChange={(e) => setPrepTime(e.target.value)}
                 placeholder="optional"
@@ -155,6 +157,7 @@ export function ItemFormModal({
                 <Field label="Happy price">
                   <input
                     type="number"
+                    min="0"
                     value={hhPrice}
                     onChange={(e) => setHhPrice(e.target.value)}
                     className="w-full text-sm font-ticket border border-ink/10 rounded-xl px-2.5 py-2 outline-none focus:border-ember"

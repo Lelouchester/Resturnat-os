@@ -129,6 +129,7 @@ export function InventoryPage() {
             </select>
             <input
               type="number"
+              min="0"
               value={newMin}
               onChange={(e) => setNewMin(e.target.value)}
               placeholder="Min stock"

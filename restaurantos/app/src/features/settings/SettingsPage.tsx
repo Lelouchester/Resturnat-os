@@ -83,10 +83,10 @@ export function SettingsPage() {
       <Section title="Tax & service charge defaults" note="Used to pre-fill Billing — still adjustable per bill.">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Default tax %">
-            <input type="number" value={settings.defaultTaxPct} onChange={(e) => handleChange({ defaultTaxPct: Number(e.target.value) || 0 })} className={inputClass} />
+            <input type="number" min="0" max="100" value={settings.defaultTaxPct} onChange={(e) => handleChange({ defaultTaxPct: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })} className={inputClass} />
           </Field>
           <Field label="Default service charge %">
-            <input type="number" value={settings.defaultServiceChargePct} onChange={(e) => handleChange({ defaultServiceChargePct: Number(e.target.value) || 0 })} className={inputClass} />
+            <input type="number" min="0" max="100" value={settings.defaultServiceChargePct} onChange={(e) => handleChange({ defaultServiceChargePct: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })} className={inputClass} />
           </Field>
         </div>
       </Section>
@@ -119,7 +119,7 @@ export function SettingsPage() {
 
       <Section title="Customer dues" note="Used for a reminder nudge on the Customers screen — doesn't affect anything automatically, just surfaces who's overdue.">
         <Field label="Remind about dues older than (days)">
-          <input type="number" value={settings.dueReminderDays} onChange={(e) => handleChange({ dueReminderDays: Number(e.target.value) || 0 })} className={inputClass} />
+          <input type="number" min="0" value={settings.dueReminderDays} onChange={(e) => handleChange({ dueReminderDays: Math.max(0, Number(e.target.value) || 0) })} className={inputClass} />
         </Field>
       </Section>
 

@@ -58,6 +58,7 @@ export function EditItemModal({
             <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Low-stock level</label>
             <input
               type="number"
+              min="0"
               value={minStock}
               onChange={(e) => setMinStock(e.target.value)}
               className="w-full text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"

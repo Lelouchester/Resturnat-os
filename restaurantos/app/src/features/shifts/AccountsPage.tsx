@@ -194,8 +194,9 @@ export function AccountsPage() {
                   <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Opening {m.label} (Rs.)</label>
                   <input
                     type="number"
+                    min="0"
                     value={opening[m.key] ?? 0}
-                    onChange={(e) => setOpening((cur) => ({ ...cur, [m.key]: Number(e.target.value) || 0 }))}
+                    onChange={(e) => setOpening((cur) => ({ ...cur, [m.key]: Math.max(0, Number(e.target.value) || 0) }))}
                     className="w-full text-lg font-ticket font-bold border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
                   />
                 </div>
@@ -343,6 +344,7 @@ export function AccountsPage() {
                       </div>
                       <input
                         type="number"
+                        min="0"
                         value={counted[m.key] ?? ''}
                         onChange={(e) => setCounted((cur) => ({ ...cur, [m.key]: e.target.value }))}
                         className="w-full text-lg font-ticket font-bold border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
@@ -671,6 +673,7 @@ function TransfersCard({
             </div>
             <input
               type="number"
+              min="0"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               max={balances[fromKey] ?? 0}
@@ -736,6 +739,7 @@ function AdjustBalanceModal({
         <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Correct balance right now (Rs.)</label>
         <input
           type="number"
+          min="0"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           autoFocus
@@ -755,8 +759,8 @@ function AdjustBalanceModal({
           className="w-full mb-5 text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
         />
 
-        <Button className="w-full" disabled={saving || delta === 0} onClick={handleSave}>
-          {saving ? 'Saving…' : delta === 0 ? 'No change to save' : 'Save correction'}
+        <Button className="w-full" disabled={saving || delta === 0 || newBalance < 0} onClick={handleSave}>
+          {saving ? 'Saving…' : newBalance < 0 ? 'Balance can\'t be negative' : delta === 0 ? 'No change to save' : 'Save correction'}
         </Button>
       </div>
     </div>

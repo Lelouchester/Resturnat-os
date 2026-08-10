@@ -514,7 +514,7 @@ function ReservationsView({ tables }: { tables: ReturnType<typeof useTablesStore
           <div className="grid grid-cols-2 gap-2 mb-2">
             <input value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="Guest name" className="text-sm border border-ink/10 rounded-xl px-3 py-2 outline-none focus:border-ember" />
             <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" className="text-sm border border-ink/10 rounded-xl px-3 py-2 outline-none focus:border-ember" />
-            <input type="number" value={partySize} onChange={(e) => setPartySize(e.target.value)} placeholder="Party size" className="text-sm font-ticket border border-ink/10 rounded-xl px-3 py-2 outline-none focus:border-ember" />
+            <input type="number" min="1" value={partySize} onChange={(e) => setPartySize(e.target.value)} placeholder="Party size" className="text-sm font-ticket border border-ink/10 rounded-xl px-3 py-2 outline-none focus:border-ember" />
             <input type="time" value={arrivalTime} onChange={(e) => setArrivalTime(e.target.value)} className="text-sm border border-ink/10 rounded-xl px-3 py-2 outline-none focus:border-ember" />
           </div>
           <input value={requests} onChange={(e) => setRequests(e.target.value)} placeholder="Special requests (optional)" className="w-full text-sm border border-ink/10 rounded-xl px-3 py-2 outline-none focus:border-ember mb-3" />
