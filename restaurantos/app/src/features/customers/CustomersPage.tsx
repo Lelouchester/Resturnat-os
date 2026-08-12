@@ -34,6 +34,7 @@ export function CustomersPage() {
   const [adding, setAdding] = useState(false)
   const [newName, setNewName] = useState('')
   const [newPhone, setNewPhone] = useState('')
+  const [newOpeningDue, setNewOpeningDue] = useState('')
 
   const overdue = useMemo(
     () => customers.filter((c) => c.outstandingDue > 0 && c.dueSince && daysOverdue(c.dueSince) >= dueReminderDays),
@@ -51,9 +52,11 @@ export function CustomersPage() {
   // Name and phone are both optional — a visit can be logged as "Walk-in"
   // and a manager can fill the details in later once they get to know someone.
   async function handleAdd() {
-    await addCustomer(newName.trim() || undefined, newPhone.trim() || undefined)
+    const due = Math.max(0, Number(newOpeningDue) || 0)
+    await addCustomer(newName.trim() || undefined, newPhone.trim() || undefined, due > 0 ? due : undefined)
     setNewName('')
     setNewPhone('')
+    setNewOpeningDue('')
     setAdding(false)
   }
 
@@ -140,8 +143,19 @@ export function CustomersPage() {
               placeholder="Phone (optional)"
               className="flex-1 text-sm border border-ink/10 rounded-xl px-3 py-2 outline-none focus:border-ember"
             />
+          </div>
+          <div className="flex items-center gap-2 mt-2">
+            <input
+              type="number"
+              min="0"
+              value={newOpeningDue}
+              onChange={(e) => setNewOpeningDue(e.target.value)}
+              placeholder="Already owes Rs. (optional)"
+              className="flex-1 text-sm border border-ink/10 rounded-xl px-3 py-2 outline-none focus:border-ember"
+            />
             <button onClick={handleAdd} className="text-sm font-semibold text-ember px-2">Save</button>
           </div>
+          <p className="text-xs text-ink/40 mt-1.5">Only for a customer who already owed you money before this software — it's saved as a normal due starting today, settle it the same way as any other.</p>
         </div>
       )}
 

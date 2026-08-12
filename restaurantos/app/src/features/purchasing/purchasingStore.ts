@@ -29,6 +29,7 @@ interface PurchasingState {
     paidAmounts: Record<string, number>
   }) => Promise<void>
   markReceived: (purchaseId: string) => Promise<void>
+  cancelPurchase: (purchaseId: string) => Promise<{ ok: boolean; error?: string }>
   recordSupplierPayment: (supplierId: string, methodKey: string, amount: number) => Promise<void>
 }
 
@@ -221,6 +222,26 @@ export const usePurchasingStore = create<PurchasingState>((set, get) => ({
       }
     }
     set(await loadPurchasing())
+  },
+
+  // Reverses a purchase in one atomic server-side step (stock, the money
+  // paid out, and any supplier shortfall) — only allowed for a purchase from
+  // today, enforced both here (button hidden below) and again in the
+  // database function itself. `p_local_day_start` is midnight in the
+  // device's own local time, the same boundary Today's Snapshot uses.
+  cancelPurchase: async (purchaseId) => {
+    const localDayStart = new Date()
+    localDayStart.setHours(0, 0, 0, 0)
+    const { error } = await supabase.rpc('cancel_purchase', {
+      p_purchase_id: purchaseId,
+      p_local_day_start: localDayStart.toISOString(),
+    })
+    if (error) {
+      console.error('[purchasingStore] cancelPurchase failed', error)
+      return { ok: false, error: error.message }
+    }
+    set(await loadPurchasing())
+    return { ok: true }
   },
 
   recordSupplierPayment: async (supplierId, methodKey, amount) => {

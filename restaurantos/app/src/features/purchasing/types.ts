@@ -25,7 +25,7 @@ export interface Supplier {
   outstandingBalance: number
 }
 
-export type PurchaseStatus = 'ordered' | 'received'
+export type PurchaseStatus = 'ordered' | 'received' | 'cancelled'
 
 export interface PurchaseRecord {
   id: string

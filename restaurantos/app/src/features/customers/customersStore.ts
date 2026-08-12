@@ -16,7 +16,7 @@ interface CustomersState {
   loading: boolean
   initialized: boolean
   init: () => void
-  addCustomer: (name?: string, phone?: string) => Promise<string>
+  addCustomer: (name?: string, phone?: string, openingDue?: number) => Promise<string>
   updateNotes: (id: string, notes: string) => Promise<void>
   updateProfile: (id: string, patch: { name?: string; phone?: string }) => Promise<void>
   settleDue: (id: string, amount: number, methodKey?: string) => Promise<void>
@@ -82,10 +82,21 @@ export const useCustomersStore = create<CustomersState>((set, get) => ({
       .subscribe()
   },
 
-  addCustomer: async (name, phone) => {
+  addCustomer: async (name, phone, openingDue) => {
+    // A one-time starting balance for customers who already owed money
+    // before this software existed — behaves exactly like a real due from
+    // here on (same settleDue flow, same "X days" aging), it's just backdated
+    // to today rather than created by an actual order.
+    const due = openingDue && openingDue > 0 ? openingDue : 0
     const { data, error } = await supabase
       .from('customers')
-      .insert({ branch_id: currentBranchId(), name: name ?? null, phone: phone ?? null })
+      .insert({
+        branch_id: currentBranchId(),
+        name: name ?? null,
+        phone: phone ?? null,
+        outstanding_due: due,
+        due_since: due > 0 ? new Date().toISOString() : null,
+      })
       .select()
       .single()
     if (error || !data) {

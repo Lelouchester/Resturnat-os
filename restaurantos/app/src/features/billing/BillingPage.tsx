@@ -162,13 +162,17 @@ export function BillingPage() {
   const paid = paymentMethods.reduce((s, m) => s + (amounts[m.key] || 0), 0)
   const remaining = total - paid // can go negative (change due)
 
-  // Typing just updates that one field — the "fill the rest into the next
-  // empty method" only happens once you leave the field (blur/Tab), not on
-  // every keystroke, so typing "15000" doesn't fight itself along the way.
+  // Typing just updates that one field — the "fill the rest into the other
+  // method" only happens once you leave the field (blur/Tab), and only when
+  // there are exactly two payment methods configured. With three or more,
+  // there's no way to know which one you meant the remainder to go to, so
+  // it's left for you to type in — guessing here previously caused money to
+  // get silently recorded against a method that was never actually paid.
   function setAmount(key: string, value: number) {
     setAmounts((cur) => ({ ...cur, [key]: Math.max(0, value) }))
   }
   function handleAmountBlur(key: string) {
+    if (paymentMethods.length !== 2) return
     setAmounts((cur) => {
       const stillOwed = total - paymentMethods.reduce((s, m) => s + (cur[m.key] || 0), 0)
       if (stillOwed > 0) {
@@ -537,7 +541,7 @@ export function BillingPage() {
               </span>
             </div>
 
-            {/* Rows generated from Settings' payment method list — add one there, it shows up here automatically. Typing an amount auto-fills the rest into the next empty method. */}
+            {/* Rows generated from Settings' payment method list — add one there, it shows up here automatically. With exactly two methods, typing an amount auto-fills the rest into the other one; with three or more, the remaining amount just shows above and you type it in yourself. */}
             <div className="space-y-2 mb-3">
               {paymentMethods.map((m) => (
                 <div key={m.key} className="flex items-center gap-2">

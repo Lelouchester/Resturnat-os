@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Plus, AlertTriangle, History, SlidersHorizontal, Pencil, Trash2 } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { useInventoryStore } from './inventoryStore'
+import { useMenuLinksStore } from './menuLinksStore'
+import { useMenuStore } from '../menu/menuStore'
 import { AdjustStockModal } from './AdjustStockModal'
 import { EditItemModal } from './EditItemModal'
 import type { InventoryItem } from './types'
@@ -13,12 +15,19 @@ export function InventoryPage() {
   const init = useInventoryStore((s) => s.init)
   const addItem = useInventoryStore((s) => s.addItem)
   const updateItem = useInventoryStore((s) => s.updateItem)
+  const menuItems = useMenuStore((s) => s.items)
+  const initMenu = useMenuStore((s) => s.init)
+  const linksByInventoryItem = useMenuLinksStore((s) => s.linksByInventoryItem)
+  const initMenuLinks = useMenuLinksStore((s) => s.init)
+  const setLinksForItem = useMenuLinksStore((s) => s.setLinksForItem)
   const deleteItem = useInventoryStore((s) => s.deleteItem)
   const adjustStock = useInventoryStore((s) => s.adjustStock)
 
   useEffect(() => {
     init()
-  }, [init])
+    initMenu()
+    initMenuLinks()
+  }, [init, initMenu, initMenuLinks])
 
   const [adjusting, setAdjusting] = useState<InventoryItem | null>(null)
   const [editing, setEditing] = useState<InventoryItem | null>(null)
@@ -242,7 +251,13 @@ export function InventoryPage() {
       {editing && (
         <EditItemModal
           item={editing}
-          onSave={(updates) => { updateItem(editing.id, updates); setEditing(null) }}
+          menuItems={menuItems.map((mi) => ({ id: mi.id, name: mi.name }))}
+          linkedMenuItemIds={linksByInventoryItem[editing.id] ?? []}
+          onSave={(updates, linkedMenuItemIds) => {
+            updateItem(editing.id, updates)
+            setLinksForItem(editing.id, linkedMenuItemIds)
+            setEditing(null)
+          }}
           onClose={() => setEditing(null)}
         />
       )}

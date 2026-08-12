@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, X, PackageCheck, Phone, Receipt, Trash2, Download } from 'lucide-react'
+import { Plus, X, PackageCheck, Phone, Receipt, Trash2, Download, Ban } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
 import { usePurchasingStore } from './purchasingStore'
@@ -21,6 +21,7 @@ export function PurchasingPage() {
   const removeSupplier = usePurchasingStore((s) => s.removeSupplier)
   const createPurchase = usePurchasingStore((s) => s.createPurchase)
   const markReceived = usePurchasingStore((s) => s.markReceived)
+  const cancelPurchase = usePurchasingStore((s) => s.cancelPurchase)
   const recordSupplierPayment = usePurchasingStore((s) => s.recordSupplierPayment)
 
   const inventoryItems = useInventoryStore((s) => s.items)
@@ -43,6 +44,7 @@ export function PurchasingPage() {
   const [creatingPurchase, setCreatingPurchase] = useState(false)
   const [payingSupplier, setPayingSupplier] = useState<string | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
+  const [cancelError, setCancelError] = useState<string | null>(null)
   const [historyFrom, setHistoryFrom] = useState(() => new Date().toISOString().slice(0, 10))
   const [historyTo, setHistoryTo] = useState(() => new Date().toISOString().slice(0, 10))
   const [search, setSearch] = useState('')
@@ -67,6 +69,19 @@ export function PurchasingPage() {
       return t >= from && t <= to
     })
   }, [purchases, suppliers, search, historyFrom, historyTo])
+
+  const purchasesTotal = useMemo(
+    () => purchasesInRange.filter((p) => p.status !== 'cancelled').reduce((sum, p) => sum + p.lines.reduce((s, l) => s + l.quantity * l.unitCost, 0), 0),
+    [purchasesInRange]
+  )
+
+  const todayStr = new Date().toDateString()
+
+  async function handleCancelPurchase(purchaseId: string) {
+    if (!window.confirm('Cancel this purchase? This reverts the money and stock it affected.')) return
+    const result = await cancelPurchase(purchaseId)
+    if (!result.ok) setCancelError(result.error ?? 'Could not cancel this purchase.')
+  }
 
   async function handleRemoveSupplier(id: string) {
     const result = await removeSupplier(id)
@@ -182,7 +197,7 @@ export function PurchasingPage() {
           <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40">Purchase history</div>
           {purchasesInRange.length > 0 && (
             <div className="font-ticket text-lg font-bold mt-0.5">
-              Rs. {purchasesInRange.reduce((sum, p) => sum + p.lines.reduce((s, l) => s + l.quantity * l.unitCost, 0), 0).toLocaleString()}
+              Rs. {purchasesTotal.toLocaleString()}
               <span className="text-xs font-normal text-ink/40 ml-1.5">
                 {search ? 'matching' : historyFrom === historyTo ? (historyFrom === new Date().toISOString().slice(0, 10) ? 'today' : historyFrom) : `${historyFrom} – ${historyTo}`}
               </span>
@@ -215,6 +230,9 @@ export function PurchasingPage() {
         </div>
       </div>
       {search && <p className="text-xs text-ink/40 mb-2">{purchasesInRange.length} result{purchasesInRange.length === 1 ? '' : 's'} across all purchases</p>}
+      {cancelError && (
+        <div className="mb-3 text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2">{cancelError}</div>
+      )}
       <div className="space-y-2">
         {purchasesInRange.length === 0 && (
           <p className="text-sm text-ink/40 text-center py-8">{search ? 'No purchases match that search.' : 'No purchases in this range.'}</p>
@@ -224,14 +242,16 @@ export function PurchasingPage() {
           const total = p.lines.reduce((sum, l) => sum + l.quantity * l.unitCost, 0)
           const paidEntries = Object.entries(p.paidAmounts).filter(([, amt]) => amt > 0)
           const paid = paidEntries.reduce((s, [, a]) => s + a, 0)
+          const isCancelled = p.status === 'cancelled'
+          const isToday = new Date(p.createdAt).toDateString() === todayStr
           return (
-            <Card key={p.id} className="p-4">
+            <Card key={p.id} className={`p-4 ${isCancelled ? 'opacity-50' : ''}`}>
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold rounded-full bg-ink/5 px-2 py-0.5">{CATEGORY_LABELS[p.category]}</span>
                   <span className="text-xs text-ink/40">{supplier?.name ?? 'One-off'}</span>
                 </div>
-                <span className="font-ticket font-bold text-sm">Rs. {total}</span>
+                <span className={`font-ticket font-bold text-sm ${isCancelled ? 'line-through' : ''}`}>Rs. {total}</span>
               </div>
               <div className="text-xs text-ink/50 mb-2">
                 {p.lines.map((l) => `${l.quantity}× ${l.description}`).join(', ')}
@@ -250,15 +270,28 @@ export function PurchasingPage() {
               )}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs">
-                  <span className={p.status === 'received' ? 'text-status-available font-semibold' : 'text-status-occupied font-semibold'}>
-                    {p.status === 'received' ? 'Received' : 'Ordered'}
-                  </span>
-                  {paid < total && <span className="text-status-cleaning font-semibold">Rs. {total - paid} unpaid</span>}
+                  {isCancelled ? (
+                    <span className="text-ink/40 font-semibold">Cancelled</span>
+                  ) : (
+                    <span className={p.status === 'received' ? 'text-status-available font-semibold' : 'text-status-occupied font-semibold'}>
+                      {p.status === 'received' ? 'Received' : 'Ordered'}
+                    </span>
+                  )}
+                  {!isCancelled && paid < total && <span className="text-status-cleaning font-semibold">Rs. {total - paid} unpaid</span>}
                 </div>
-                {p.status !== 'received' && (
-                  <button onClick={() => markReceived(p.id)} className="flex items-center gap-1 text-ember font-semibold text-xs">
-                    <PackageCheck size={13} /> Mark received
-                  </button>
+                {!isCancelled && (
+                  <div className="flex items-center gap-3">
+                    {p.status !== 'received' && (
+                      <button onClick={() => markReceived(p.id)} className="flex items-center gap-1 text-ember font-semibold text-xs">
+                        <PackageCheck size={13} /> Mark received
+                      </button>
+                    )}
+                    {isToday && (
+                      <button onClick={() => handleCancelPurchase(p.id)} className="flex items-center gap-1 text-status-cleaning font-semibold text-xs">
+                        <Ban size={13} /> Cancel
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </Card>

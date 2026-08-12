@@ -1,0 +1,114 @@
+import { useEffect, useState } from 'react'
+import { supabase } from '../../shared/lib/supabase'
+
+export type UsagePeriod = 'week' | 'month'
+
+export interface ItemUsageRow {
+  inventoryItemId: string
+  inventoryItemName: string
+  unit: string
+  purchasedQty: number
+  soldTotal: number
+  soldBreakdown: { menuItemName: string; qty: number }[]
+}
+
+function rangeStart(period: UsagePeriod): Date {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  if (period === 'week') d.setDate(d.getDate() - 6)
+  else d.setDate(d.getDate() - 29)
+  return d
+}
+
+/**
+ * Purchased-vs-sold comparison for inventory items that have been linked to
+ * menu items (Inventory > edit item > "Used in these menu items"). Purely a
+ * reporting comparison — not tied to real-time stock deduction, so a rough
+ * or incomplete set of links can't corrupt any real stock number.
+ */
+export function useItemUsageData(
+  period: UsagePeriod,
+  itemsWithLinks: { id: string; name: string; unit: string; linkedMenuItemIds: string[] }[],
+  menuItemNames: Record<string, string>
+) {
+  const [rows, setRows] = useState<ItemUsageRow[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function load() {
+      if (itemsWithLinks.length === 0) {
+        setRows([])
+        setLoading(false)
+        return
+      }
+      setLoading(true)
+
+      const from = rangeStart(period).toISOString()
+      const inventoryIds = itemsWithLinks.map((i) => i.id)
+      const allMenuIds = Array.from(new Set(itemsWithLinks.flatMap((i) => i.linkedMenuItemIds)))
+
+      const [{ data: purchaseLines, error: plErr }, { data: orderItems, error: oiErr }] = await Promise.all([
+        supabase
+          .from('purchase_lines')
+          .select('inventory_item_id, quantity, purchases!inner ( created_at, status )')
+          .in('inventory_item_id', inventoryIds)
+          .eq('kind', 'inventory')
+          .neq('purchases.status', 'cancelled')
+          .gte('purchases.created_at', from),
+        allMenuIds.length > 0
+          ? supabase
+              .from('order_items')
+              .select('menu_item_id, quantity, status, orders!inner ( closed_at, status )')
+              .in('menu_item_id', allMenuIds)
+              .neq('status', 'void')
+              .eq('orders.status', 'paid')
+              .gte('orders.closed_at', from)
+          : Promise.resolve({ data: [], error: null }),
+      ])
+
+      if (plErr) console.error('[useItemUsageData] purchase_lines query failed', plErr)
+      if (oiErr) console.error('[useItemUsageData] order_items query failed', oiErr)
+
+      const purchasedByItem = new Map<string, number>()
+      for (const l of purchaseLines ?? []) {
+        const id = (l as any).inventory_item_id
+        purchasedByItem.set(id, (purchasedByItem.get(id) ?? 0) + Number((l as any).quantity))
+      }
+
+      const soldByMenuItem = new Map<string, number>()
+      for (const oi of orderItems ?? []) {
+        const id = (oi as any).menu_item_id
+        soldByMenuItem.set(id, (soldByMenuItem.get(id) ?? 0) + Number((oi as any).quantity))
+      }
+
+      const result: ItemUsageRow[] = itemsWithLinks.map((item) => {
+        const soldBreakdown = item.linkedMenuItemIds
+          .map((menuId) => ({ menuItemName: menuItemNames[menuId] ?? 'Item', qty: soldByMenuItem.get(menuId) ?? 0 }))
+          .filter((b) => b.qty > 0)
+          .sort((a, b) => b.qty - a.qty)
+        return {
+          inventoryItemId: item.id,
+          inventoryItemName: item.name,
+          unit: item.unit,
+          purchasedQty: purchasedByItem.get(item.id) ?? 0,
+          soldTotal: soldBreakdown.reduce((s, b) => s + b.qty, 0),
+          soldBreakdown,
+        }
+      })
+
+      if (!cancelled) {
+        setRows(result)
+        setLoading(false)
+      }
+    }
+
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [period, JSON.stringify(itemsWithLinks), JSON.stringify(menuItemNames)])
+
+  return { rows, loading }
+}

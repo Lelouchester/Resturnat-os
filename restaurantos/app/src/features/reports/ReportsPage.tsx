@@ -7,6 +7,7 @@ import { TrendingUp, AlertTriangle, Star, Users, Clock } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { useReportsData, type ReportRange } from './useReportsData'
 import { TodaySnapshot } from './TodaySnapshot'
+import { ItemUsageReport } from './ItemUsageReport'
 import { useInventoryStore } from '../inventory/inventoryStore'
 import { useCustomersStore } from '../customers/customersStore'
 import { useAuthStore } from '../auth/authStore'
@@ -24,7 +25,7 @@ export function ReportsPage() {
   // multi-range, chart-heavy view for actually analyzing trends. Different
   // audiences, different jobs — kept as two clearly separate views rather
   // than merging them into one increasingly busy page.
-  const [view, setView] = useState<'today' | 'detailed'>('today')
+  const [view, setView] = useState<'today' | 'detailed' | 'usage'>('today')
 
   const inventoryItems = useInventoryStore((s) => s.items)
   const initInventory = useInventoryStore((s) => s.init)
@@ -55,7 +56,7 @@ export function ReportsPage() {
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div>
           <h1 className="font-ticket text-xl font-bold">Reports</h1>
-          <p className="text-sm text-ink/50">{view === 'today' ? "A quick look at today" : 'Sales, performance, and business insights'}</p>
+          <p className="text-sm text-ink/50">{view === 'today' ? "A quick look at today" : view === 'usage' ? 'Purchased vs. sold, for linked items' : 'Sales, performance, and business insights'}</p>
         </div>
         <div className="flex gap-1 bg-surface border border-ink/10 rounded-xl p-1">
           <button
@@ -70,11 +71,19 @@ export function ReportsPage() {
           >
             Detailed Reports
           </button>
+          <button
+            onClick={() => setView('usage')}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${view === 'usage' ? 'bg-ink text-paper' : 'text-ink/50'}`}
+          >
+            Item Usage
+          </button>
         </div>
       </div>
 
       {view === 'today' ? (
         <TodaySnapshot />
+      ) : view === 'usage' ? (
+        <ItemUsageReport />
       ) : (
         <>
       <div className="flex items-center justify-end mb-4">
