@@ -10,6 +10,7 @@ export function KitchenPage() {
   const loading = useOrdersStore((s) => s.loading)
   const init = useOrdersStore((s) => s.init)
   const updateItemStatus = useOrdersStore((s) => s.updateItemStatus)
+  const markItemsPrinted = useOrdersStore((s) => s.markItemsPrinted)
   const [printingTicket, setPrintingTicket] = useState<KitchenTicket | null>(null)
 
   useEffect(() => {
@@ -19,13 +20,18 @@ export function KitchenPage() {
   const tickets = useMemo(() => buildKitchenTickets(orders), [orders])
 
   // Print only the one ticket picked, then clear so the board comes back.
+  // The moment print fires is also the moment "new" items become "already
+  // sent" — stamping it here, not on the print button click, means it still
+  // happens correctly if the print dialog is cancelled and retried.
   useEffect(() => {
     if (!printingTicket) return
+    const newItemIds = printingTicket.items.filter((i) => i.status !== 'served' && !i.kotPrintedAt).map((i) => i.id)
+    markItemsPrinted(newItemIds)
     const handle = () => setPrintingTicket(null)
     window.addEventListener('afterprint', handle)
     window.print()
     return () => window.removeEventListener('afterprint', handle)
-  }, [printingTicket])
+  }, [printingTicket, markItemsPrinted])
 
   return (
     <>

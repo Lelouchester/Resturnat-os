@@ -318,6 +318,7 @@ create table order_items (
   status order_item_status not null default 'pending',
   is_complimentary boolean default false,
   void_reason text, -- set when status = 'void'
+  kot_printed_at timestamptz, -- set the moment this item is first sent to the kitchen on a KOT print
   created_at timestamptz default now(),
   status_updated_at timestamptz default now()
 );

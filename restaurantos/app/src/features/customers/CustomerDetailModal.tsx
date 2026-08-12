@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { X, Star, Phone, Pencil } from 'lucide-react'
+import { X, Star, Phone, Pencil, Trash2 } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
 import { useCustomersStore, fetchCustomerVisits, type Visit } from './customersStore'
 import { useSettingsStore } from '../settings/settingsStore'
@@ -19,6 +19,7 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
   const updateNotes = useCustomersStore((s) => s.updateNotes)
   const updateProfile = useCustomersStore((s) => s.updateProfile)
   const settleDue = useCustomersStore((s) => s.settleDue)
+  const removeCustomer = useCustomersStore((s) => s.removeCustomer)
   const paymentMethods = useSettingsStore((s) => s.paymentMethods)
   const setPendingOrder = useRepeatOrderStore((s) => s.setPending)
   const navigate = useNavigate()
@@ -29,6 +30,7 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
   const [editingProfile, setEditingProfile] = useState(!customer.name && !customer.phone)
   const [name, setName] = useState(customer.name ?? '')
   const [phone, setPhone] = useState(customer.phone ?? '')
+  const [removeError, setRemoveError] = useState<string | null>(null)
 
   const [visits, setVisits] = useState<Visit[] | null>(null)
   const [favoriteItem, setFavoriteItem] = useState<string | undefined>(undefined)
@@ -56,6 +58,13 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
   function saveProfile() {
     updateProfile(customer.id, { name: name.trim() || undefined, phone: phone.trim() || undefined })
     setEditingProfile(false)
+  }
+
+  async function handleRemove() {
+    if (!window.confirm(`Remove "${customer.name || 'this customer'}"? This can't be undone.`)) return
+    const result = await removeCustomer(customer.id)
+    if (result.ok) onClose()
+    else setRemoveError(result.error ?? 'Could not remove this customer.')
   }
 
   return (
@@ -207,6 +216,16 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
             </div>
           )}
         </div>
+
+        {removeError && (
+          <div className="mt-4 text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2">{removeError}</div>
+        )}
+        <button
+          onClick={handleRemove}
+          className="mt-4 w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-ink/40 hover:text-status-cleaning py-2"
+        >
+          <Trash2 size={12} /> Remove customer
+        </button>
       </div>
     </div>
   )

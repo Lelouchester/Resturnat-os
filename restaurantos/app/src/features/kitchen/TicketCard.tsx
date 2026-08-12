@@ -75,6 +75,9 @@ export function TicketCard({
                 <span className={`flex-1 text-sm ${done ? 'line-through text-ink/35' : ''}`}>
                   <span className="font-ticket font-semibold">{item.quantity}×</span>{' '}
                   <span className="font-medium">{item.name}</span>
+                  {!done && !item.kotPrintedAt && (
+                    <span className="ml-1.5 inline-flex items-center text-[10px] font-bold text-ember align-middle">NEW</span>
+                  )}
                   {item.isComplimentary && (
                     <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-bold text-ember align-middle">
                       <Gift size={11} /> COMP

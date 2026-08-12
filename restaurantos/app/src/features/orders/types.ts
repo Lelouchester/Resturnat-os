@@ -31,6 +31,7 @@ export interface OrderItemRow {
   voidReason?: string
   createdAt: string
   excludeFromDiscount: boolean // from the item's menu category — e.g. alcohol
+  kotPrintedAt?: string | null // set the moment this item is first sent to the kitchen — null means it hasn't been printed yet
 }
 
 export interface LiveOrder {

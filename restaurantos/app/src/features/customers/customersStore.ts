@@ -21,6 +21,7 @@ interface CustomersState {
   updateProfile: (id: string, patch: { name?: string; phone?: string }) => Promise<void>
   settleDue: (id: string, amount: number, methodKey?: string) => Promise<void>
   applyPayment: (id: string, billTotal: number, dueDelta: number) => Promise<void>
+  removeCustomer: (id: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 function mapRow(row: any, visitCounts: Map<string, number>): Customer {
@@ -150,6 +151,29 @@ export const useCustomersStore = create<CustomersState>((set, get) => ({
       .eq('id', id)
     if (error) console.error('[customersStore] applyPayment failed', error)
     set({ customers: await loadCustomers() })
+  },
+
+  // Only removes customers with no real history behind them — a name a
+  // manager typed in by mistake, not a real customer with orders or an
+  // unsettled due. If either exists, the database itself blocks the delete
+  // (orders reference customer_id), so this is here mainly to turn that
+  // block into a clear message instead of a raw database error, and to add
+  // the due check up front so money owed can't quietly vanish.
+  removeCustomer: async (id) => {
+    const cust = get().customers.find((c) => c.id === id)
+    if (cust && cust.outstandingDue > 0) {
+      return { ok: false, error: `This customer still has Rs. ${cust.outstandingDue} due — settle that first, or the amount owed gets lost.` }
+    }
+    const { error } = await supabase.from('customers').delete().eq('id', id)
+    if (error) {
+      if (error.code === '23503') {
+        return { ok: false, error: 'This customer has real order history, so they can\'t be deleted — rename them instead if the name was a mistake.' }
+      }
+      console.error('[customersStore] removeCustomer failed', error)
+      return { ok: false, error: 'Could not remove this customer.' }
+    }
+    set({ customers: await loadCustomers() })
+    return { ok: true }
   },
 }))
 

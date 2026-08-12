@@ -7,6 +7,7 @@ import { useInventoryStore } from '../inventory/inventoryStore'
 import { useAccountsStore } from '../accounts/accountsStore'
 import { useSettingsStore } from '../settings/settingsStore'
 import { CATEGORY_LABELS } from './types'
+import { PurchaseTrendsView } from './PurchaseTrendsView'
 import type { PurchaseLine, PurchaseCategory } from './types'
 
 const NEW_ITEM_SENTINEL = '__new__'
@@ -45,6 +46,7 @@ export function PurchasingPage() {
   const [payingSupplier, setPayingSupplier] = useState<string | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
   const [cancelError, setCancelError] = useState<string | null>(null)
+  const [view, setView] = useState<'history' | 'trends'>('history')
   const [historyFrom, setHistoryFrom] = useState(() => new Date().toISOString().slice(0, 10))
   const [historyTo, setHistoryTo] = useState(() => new Date().toISOString().slice(0, 10))
   const [search, setSearch] = useState('')
@@ -192,6 +194,27 @@ export function PurchasingPage() {
       </div>
 
       {/* Purchase history */}
+      <div className="flex items-center justify-end mb-3">
+        <div className="flex gap-1 bg-surface border border-ink/10 rounded-xl p-1">
+          <button
+            onClick={() => setView('history')}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${view === 'history' ? 'bg-ink text-paper' : 'text-ink/50'}`}
+          >
+            History
+          </button>
+          <button
+            onClick={() => setView('trends')}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${view === 'trends' ? 'bg-ink text-paper' : 'text-ink/50'}`}
+          >
+            Trends
+          </button>
+        </div>
+      </div>
+
+      {view === 'trends' ? (
+        <PurchaseTrendsView />
+      ) : (
+        <>
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <div>
           <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40">Purchase history</div>
@@ -298,6 +321,8 @@ export function PurchasingPage() {
           )
         })}
       </div>
+        </>
+      )}
 
       {creatingPurchase && (
         <NewPurchaseModal

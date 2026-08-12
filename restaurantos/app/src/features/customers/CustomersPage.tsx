@@ -4,6 +4,7 @@ import { useCustomersStore } from './customersStore'
 import { useContactsStore } from './contactsStore'
 import { useSettingsStore } from '../settings/settingsStore'
 import { CustomerDetailModal } from './CustomerDetailModal'
+import { DuesView } from './DuesView'
 import { loyaltyTier } from './types'
 
 const TIER_STYLE: Record<string, string> = {
@@ -29,7 +30,7 @@ export function CustomersPage() {
   }, [init])
 
   const [search, setSearch] = useState('')
-  const [tab, setTab] = useState<'customers' | 'contacts'>('customers')
+  const [tab, setTab] = useState<'customers' | 'contacts' | 'dues'>('customers')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [newName, setNewName] = useState('')
@@ -92,6 +93,12 @@ export function CustomersPage() {
             >
               Contacts
             </button>
+            <button
+              onClick={() => setTab('dues')}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${tab === 'dues' ? 'bg-surface shadow-sm' : 'text-ink/50'}`}
+            >
+              Dues{overdue.length > 0 ? ` (${overdue.length})` : ''}
+            </button>
           </div>
           {tab === 'customers' && (
             <button
@@ -106,6 +113,11 @@ export function CustomersPage() {
 
       {tab === 'contacts' ? (
         <ContactsView />
+      ) : tab === 'dues' ? (
+        <>
+          <DuesView customers={customers} onSelect={setSelectedId} />
+          {selected && <CustomerDetailModal customer={selected} onClose={() => setSelectedId(null)} />}
+        </>
       ) : (
         <>
 

@@ -34,6 +34,7 @@ interface OrdersState {
   sendItemsToKitchen: (tableId: string, lines: CartLine[]) => Promise<void>
   updateItemStatus: (itemId: string, status: OrderItemStatus) => Promise<void>
   markItemsServed: (itemIds: string[]) => Promise<void>
+  markItemsPrinted: (itemIds: string[]) => Promise<void>
   voidItem: (itemId: string, reason: string) => Promise<void>
   cancelOrder: (tableId: string, reason: string) => Promise<void>
   beginBilling: (tableId: string) => Promise<void>
@@ -61,7 +62,7 @@ const ORDER_SELECT = `
   subtotal, discount_amount, service_charge, tax_amount, tip_amount, total, split_guest_count,
   opened_at, closed_at,
   restaurant_tables ( label ),
-  order_items ( id, menu_item_id, custom_name, quantity, unit_price, note, status, is_complimentary, void_reason, created_at, menu_items ( name, menu_categories ( exclude_from_discount ) ) )
+  order_items ( id, menu_item_id, custom_name, quantity, unit_price, note, status, is_complimentary, void_reason, created_at, kot_printed_at, menu_items ( name, menu_categories ( exclude_from_discount ) ) )
 `
 
 function mapOrderRow(row: any): LiveOrder {
@@ -79,6 +80,7 @@ function mapOrderRow(row: any): LiveOrder {
       voidReason: it.void_reason ?? undefined,
       createdAt: it.created_at,
       excludeFromDiscount: it.menu_items?.menu_categories?.exclude_from_discount ?? false,
+      kotPrintedAt: it.kot_printed_at ?? null,
     }))
     .sort((a: OrderItemRow, b: OrderItemRow) => a.createdAt.localeCompare(b.createdAt))
 
@@ -238,6 +240,21 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       .update({ status: 'served', status_updated_at: new Date().toISOString() })
       .in('id', itemIds)
     if (error) console.error('[ordersStore] markItemsServed failed', error)
+  },
+
+  // Stamps the moment these items were sent to the kitchen. Only ever
+  // called for items that don't already have a kot_printed_at — that's what
+  // lets a reprint (after new items get added to the same table) show which
+  // ones are genuinely new versus already fired, instead of the whole order
+  // looking new again every time.
+  markItemsPrinted: async (itemIds) => {
+    if (itemIds.length === 0) return
+    const { error } = await supabase
+      .from('order_items')
+      .update({ kot_printed_at: new Date().toISOString() })
+      .in('id', itemIds)
+      .is('kot_printed_at', null)
+    if (error) console.error('[ordersStore] markItemsPrinted failed', error)
   },
 
   voidItem: async (itemId, reason) => {
