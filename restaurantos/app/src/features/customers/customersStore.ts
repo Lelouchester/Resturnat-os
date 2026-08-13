@@ -178,6 +178,7 @@ export const useCustomersStore = create<CustomersState>((set, get) => ({
 }))
 
 export interface Visit {
+  id: string
   date: string
   amount: number
   itemsSummary: string
@@ -188,7 +189,7 @@ export interface Visit {
 export async function fetchCustomerVisits(customerId: string): Promise<{ visits: Visit[]; favoriteItem?: string }> {
   const { data, error } = await supabase
     .from('orders')
-    .select('closed_at, total, order_items ( quantity, custom_name, is_complimentary, status, menu_items ( name ) )')
+    .select('id, closed_at, total, order_items ( quantity, custom_name, is_complimentary, status, menu_items ( name ) )')
     .eq('customer_id', customerId)
     .eq('status', 'paid')
     .order('closed_at', { ascending: false })
@@ -207,6 +208,7 @@ export async function fetchCustomerVisits(customerId: string): Promise<{ visits:
       itemCounts.set(name, (itemCounts.get(name) ?? 0) + i.quantity)
     }
     return {
+      id: o.id,
       date: o.closed_at,
       amount: Number(o.total) || 0,
       itemsSummary: activeItems.map((i: any) => `${i.quantity}x ${i.custom_name ?? i.menu_items?.name ?? 'Item'}`).join(', '),

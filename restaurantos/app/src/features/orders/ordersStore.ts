@@ -55,6 +55,7 @@ interface OrdersState {
     customerId?: string
     mergedOrderIds?: string[]
   }) => Promise<void>
+  cancelPaidOrder: (orderId: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 const ORDER_SELECT = `
@@ -506,5 +507,26 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     }
 
     set({ orders: await loadOpenOrders() })
+  },
+
+  // Reverses a completed (paid) order from today — the money it collected,
+  // any tracked inventory it deducted, and its effect on the attached
+  // customer's due/lifetime spend, all atomically in one database function.
+  // Built for same-day mistakes like a duplicate order entered twice, not
+  // as a general "undo any order" tool — see the migration for the exact
+  // rules it enforces (today only, paid orders only, not a merged bill).
+  cancelPaidOrder: async (orderId) => {
+    const localDayStart = new Date()
+    localDayStart.setHours(0, 0, 0, 0)
+    const { error } = await supabase.rpc('cancel_order', {
+      p_order_id: orderId,
+      p_local_day_start: localDayStart.toISOString(),
+    })
+    if (error) {
+      console.error('[ordersStore] cancelPaidOrder failed', error)
+      return { ok: false, error: error.message }
+    }
+    set({ orders: await loadOpenOrders() })
+    return { ok: true }
   },
 }))

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { X, Star, Phone, Pencil, Trash2 } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
 import { useCustomersStore, fetchCustomerVisits, type Visit } from './customersStore'
+import { useOrdersStore } from '../orders/ordersStore'
 import { useSettingsStore } from '../settings/settingsStore'
 import { useRepeatOrderStore } from '../orders/repeatOrderStore'
 import { loyaltyTier } from './types'
@@ -20,6 +21,7 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
   const updateProfile = useCustomersStore((s) => s.updateProfile)
   const settleDue = useCustomersStore((s) => s.settleDue)
   const removeCustomer = useCustomersStore((s) => s.removeCustomer)
+  const cancelPaidOrder = useOrdersStore((s) => s.cancelPaidOrder)
   const paymentMethods = useSettingsStore((s) => s.paymentMethods)
   const setPendingOrder = useRepeatOrderStore((s) => s.setPending)
   const navigate = useNavigate()
@@ -31,6 +33,7 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
   const [name, setName] = useState(customer.name ?? '')
   const [phone, setPhone] = useState(customer.phone ?? '')
   const [removeError, setRemoveError] = useState<string | null>(null)
+  const [cancelOrderError, setCancelOrderError] = useState<string | null>(null)
 
   const [visits, setVisits] = useState<Visit[] | null>(null)
   const [favoriteItem, setFavoriteItem] = useState<string | undefined>(undefined)
@@ -65,6 +68,13 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
     const result = await removeCustomer(customer.id)
     if (result.ok) onClose()
     else setRemoveError(result.error ?? 'Could not remove this customer.')
+  }
+
+  async function handleCancelVisit(visitId: string) {
+    if (!window.confirm("Cancel this order? This reverts the money, stock, and due it affected.")) return
+    const result = await cancelPaidOrder(visitId)
+    if (result.ok) setVisits(await fetchCustomerVisits(customer.id).then((r) => r.visits))
+    else setCancelOrderError(result.error ?? 'Could not cancel this order.')
   }
 
   return (
@@ -198,24 +208,41 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
             <p className="text-sm text-ink/40">No visits recorded yet.</p>
           ) : (
             <div className="space-y-2">
-              {visits.map((v, i) => (
-                <div key={i} className="flex justify-between items-start text-sm border-b border-ink/5 pb-2 last:border-0">
-                  <div className="min-w-0">
-                    <div className="text-xs text-ink/40">{new Date(v.date).toLocaleDateString()}</div>
-                    <div className="text-xs text-ink/50">{v.itemsSummary}</div>
-                    <button
-                      onClick={() => repeatOrder(v.itemsSummary)}
-                      className="text-[11px] font-semibold text-ember mt-1"
-                    >
-                      ↻ Repeat this order
-                    </button>
+              {visits.map((v) => {
+                const isToday = new Date(v.date).toDateString() === new Date().toDateString()
+                return (
+                  <div key={v.id} className="flex justify-between items-start text-sm border-b border-ink/5 pb-2 last:border-0">
+                    <div className="min-w-0">
+                      <div className="text-xs text-ink/40">{new Date(v.date).toLocaleDateString()}</div>
+                      <div className="text-xs text-ink/50">{v.itemsSummary}</div>
+                      <div className="flex items-center gap-3 mt-1">
+                        <button
+                          onClick={() => repeatOrder(v.itemsSummary)}
+                          className="text-[11px] font-semibold text-ember"
+                        >
+                          ↻ Repeat this order
+                        </button>
+                        {isToday && (
+                          <button
+                            onClick={() => handleCancelVisit(v.id)}
+                            className="text-[11px] font-semibold text-status-cleaning"
+                          >
+                            Cancel this order
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <span className="font-ticket font-semibold shrink-0">Rs. {v.amount}</span>
                   </div>
-                  <span className="font-ticket font-semibold shrink-0">Rs. {v.amount}</span>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
+
+        {cancelOrderError && (
+          <div className="mt-3 text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2">{cancelOrderError}</div>
+        )}
 
         {removeError && (
           <div className="mt-4 text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2">{removeError}</div>
