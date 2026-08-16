@@ -169,7 +169,7 @@ export function OrdersPage() {
               currentName={activeTableRow?.customerName}
               currentPhone={activeTableRow?.customerPhone}
               onAssign={(c) => {
-                updateGuestInfo(activeTable, { customerName: c.name, customerPhone: c.phone })
+                updateGuestInfo(activeTable, { customerName: c.name, customerPhone: c.phone, customerId: c.id })
                 attachCustomer(activeTable, c.id)
               }}
             />

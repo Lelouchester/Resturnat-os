@@ -73,19 +73,21 @@ export function ItemUsageReport() {
                   <div className="font-ticket font-bold text-lg">
                     {r.purchasedQty} <span className="text-xs font-normal text-ink/50">{r.unit}</span>
                   </div>
+                  <div className="text-xs text-ink/40 mt-0.5">Rs. {Math.round(r.purchasedSpend).toLocaleString()} spent</div>
                 </div>
                 <div className="rounded-xl bg-ink/[0.03] p-3">
                   <div className="text-[11px] uppercase tracking-wider text-ink/40 mb-0.5">Sold (linked items)</div>
                   <div className="font-ticket font-bold text-lg">
                     {r.soldTotal} <span className="text-xs font-normal text-ink/50">units</span>
                   </div>
+                  <div className="text-xs text-ink/40 mt-0.5">Rs. {Math.round(r.soldRevenue).toLocaleString()} in sales</div>
                 </div>
               </div>
               {r.soldBreakdown.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
                   {r.soldBreakdown.map((b) => (
                     <span key={b.menuItemName} className="text-[11px] font-semibold bg-ink/[0.04] rounded-full px-2 py-0.5">
-                      {b.menuItemName}: {b.qty}
+                      {b.menuItemName}: {b.qty} · Rs. {Math.round(b.revenue).toLocaleString()}
                     </span>
                   ))}
                 </div>

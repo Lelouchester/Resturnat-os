@@ -8,8 +8,10 @@ export interface ItemUsageRow {
   inventoryItemName: string
   unit: string
   purchasedQty: number
+  purchasedSpend: number
   soldTotal: number
-  soldBreakdown: { menuItemName: string; qty: number }[]
+  soldRevenue: number
+  soldBreakdown: { menuItemName: string; qty: number; revenue: number }[]
 }
 
 function rangeStart(period: UsagePeriod): Date {
@@ -52,7 +54,7 @@ export function useItemUsageData(
       const [{ data: purchaseLines, error: plErr }, { data: orderItems, error: oiErr }] = await Promise.all([
         supabase
           .from('purchase_lines')
-          .select('inventory_item_id, quantity, purchases!inner ( created_at, status )')
+          .select('inventory_item_id, quantity, unit_cost, purchases!inner ( created_at, status )')
           .in('inventory_item_id', inventoryIds)
           .eq('kind', 'inventory')
           .neq('purchases.status', 'cancelled')
@@ -60,7 +62,7 @@ export function useItemUsageData(
         allMenuIds.length > 0
           ? supabase
               .from('order_items')
-              .select('menu_item_id, quantity, status, orders!inner ( closed_at, status )')
+              .select('menu_item_id, quantity, unit_price, status, orders!inner ( closed_at, status )')
               .in('menu_item_id', allMenuIds)
               .neq('status', 'void')
               .eq('orders.status', 'paid')
@@ -71,29 +73,41 @@ export function useItemUsageData(
       if (plErr) console.error('[useItemUsageData] purchase_lines query failed', plErr)
       if (oiErr) console.error('[useItemUsageData] order_items query failed', oiErr)
 
-      const purchasedByItem = new Map<string, number>()
+      const purchasedQtyByItem = new Map<string, number>()
+      const purchasedSpendByItem = new Map<string, number>()
       for (const l of purchaseLines ?? []) {
         const id = (l as any).inventory_item_id
-        purchasedByItem.set(id, (purchasedByItem.get(id) ?? 0) + Number((l as any).quantity))
+        const qty = Number((l as any).quantity)
+        purchasedQtyByItem.set(id, (purchasedQtyByItem.get(id) ?? 0) + qty)
+        purchasedSpendByItem.set(id, (purchasedSpendByItem.get(id) ?? 0) + qty * Number((l as any).unit_cost))
       }
 
-      const soldByMenuItem = new Map<string, number>()
+      const soldQtyByMenuItem = new Map<string, number>()
+      const soldRevenueByMenuItem = new Map<string, number>()
       for (const oi of orderItems ?? []) {
         const id = (oi as any).menu_item_id
-        soldByMenuItem.set(id, (soldByMenuItem.get(id) ?? 0) + Number((oi as any).quantity))
+        const qty = Number((oi as any).quantity)
+        soldQtyByMenuItem.set(id, (soldQtyByMenuItem.get(id) ?? 0) + qty)
+        soldRevenueByMenuItem.set(id, (soldRevenueByMenuItem.get(id) ?? 0) + qty * Number((oi as any).unit_price))
       }
 
       const result: ItemUsageRow[] = itemsWithLinks.map((item) => {
         const soldBreakdown = item.linkedMenuItemIds
-          .map((menuId) => ({ menuItemName: menuItemNames[menuId] ?? 'Item', qty: soldByMenuItem.get(menuId) ?? 0 }))
+          .map((menuId) => ({
+            menuItemName: menuItemNames[menuId] ?? 'Item',
+            qty: soldQtyByMenuItem.get(menuId) ?? 0,
+            revenue: soldRevenueByMenuItem.get(menuId) ?? 0,
+          }))
           .filter((b) => b.qty > 0)
           .sort((a, b) => b.qty - a.qty)
         return {
           inventoryItemId: item.id,
           inventoryItemName: item.name,
           unit: item.unit,
-          purchasedQty: purchasedByItem.get(item.id) ?? 0,
+          purchasedQty: purchasedQtyByItem.get(item.id) ?? 0,
+          purchasedSpend: purchasedSpendByItem.get(item.id) ?? 0,
           soldTotal: soldBreakdown.reduce((s, b) => s + b.qty, 0),
+          soldRevenue: soldBreakdown.reduce((s, b) => s + b.revenue, 0),
           soldBreakdown,
         }
       })

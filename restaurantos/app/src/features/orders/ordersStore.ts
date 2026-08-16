@@ -162,9 +162,22 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     if (existing) return existing.id
 
     const shiftId = useShiftStore.getState().shift?.id
+    // A customer may already have been assigned to this table before any
+    // items were added (tapping the table and picking a name first) — carry
+    // that over onto the order now, or it's otherwise never linked, since
+    // this insert is the only place the order's customer_id gets set at
+    // creation time.
+    const table = useTablesStore.getState().tables.find((t) => t.id === tableId)
     const { data, error } = await supabase
       .from('orders')
-      .insert({ branch_id: currentBranchId(), table_id: tableId, shift_id: shiftId ?? null, waiter_id: useAuthStore.getState().staff?.id ?? null, status: 'open' })
+      .insert({
+        branch_id: currentBranchId(),
+        table_id: tableId,
+        shift_id: shiftId ?? null,
+        waiter_id: useAuthStore.getState().staff?.id ?? null,
+        customer_id: table?.customerId ?? null,
+        status: 'open',
+      })
       .select()
       .single()
 
