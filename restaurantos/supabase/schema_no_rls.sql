@@ -831,6 +831,22 @@ $$;
 
 grant execute on function cancel_order(uuid, timestamptz) to authenticated;
 
+-- ----------------------------------------------------------------------------
+-- Manual bank reconciliation ledger — see migration 006 for full comments.
+-- Deliberately append-only: no update/delete policy exists for this table.
+-- ----------------------------------------------------------------------------
+
+create table bank_ledger_entries (
+  id uuid primary key default uuid_generate_v4(),
+  branch_id uuid references branches(id) on delete cascade,
+  entry_date date not null,
+  amount numeric(12,2) not null,
+  remark text not null,
+  created_by uuid references staff(id),
+  created_at timestamptz default now()
+);
+
+
 
 create table menu_inventory_links (
   id uuid primary key default uuid_generate_v4(),

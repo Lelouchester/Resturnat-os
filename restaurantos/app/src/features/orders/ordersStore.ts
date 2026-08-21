@@ -38,7 +38,7 @@ interface OrdersState {
   voidItem: (itemId: string, reason: string) => Promise<void>
   cancelOrder: (tableId: string, reason: string) => Promise<void>
   beginBilling: (tableId: string) => Promise<void>
-  attachCustomer: (tableId: string, customerId: string) => Promise<void>
+  attachCustomer: (tableId: string, customerId: string | null) => Promise<void>
   transferOrderTable: (fromTableId: string, toTableId: string) => Promise<void>
   mergeOrders: (fromTableId: string, intoTableId: string) => Promise<void>
   unmergeOrder: (orderId: string) => Promise<void>

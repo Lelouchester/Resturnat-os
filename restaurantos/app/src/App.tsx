@@ -20,6 +20,7 @@ import { CustomersPage } from './features/customers/CustomersPage'
 import { StaffPage } from './features/staff/StaffPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { LoginPage } from './features/auth/LoginPage'
+import { BankPage } from './features/bank/BankPage'
 
 // Reports pulls in recharts, which is heavy — lazy-load it so the chart
 // library only downloads when someone actually opens Reports, instead of
@@ -134,6 +135,7 @@ function App() {
                 }
               />
               <Route path="/staff" element={<StaffPage />} />
+              <Route path="/bank" element={<BankPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/login" element={<LoginPage />} />
             </Routes>

@@ -839,6 +839,22 @@ $$;
 
 grant execute on function cancel_order(uuid, timestamptz) to authenticated;
 
+-- ----------------------------------------------------------------------------
+-- Manual bank reconciliation ledger — see migration 006 for full comments.
+-- Deliberately append-only: no update/delete policy exists for this table.
+-- ----------------------------------------------------------------------------
+
+create table bank_ledger_entries (
+  id uuid primary key default uuid_generate_v4(),
+  branch_id uuid references branches(id) on delete cascade,
+  entry_date date not null,
+  amount numeric(12,2) not null,
+  remark text not null,
+  created_by uuid references staff(id),
+  created_at timestamptz default now()
+);
+
+
 
 -- ----------------------------------------------------------------------------
 -- Menu item <-> inventory item links, for usage comparison reports only.
@@ -930,6 +946,15 @@ alter table account_transfers enable row level security;
 -- select-only, and only for staff with the 'financials' permission.
 create policy "financials-permitted staff can view their branch transfers" on account_transfers for select
   using (branch_id = current_staff_branch() and current_staff_financials_ok());
+
+alter table bank_ledger_entries enable row level security;
+-- Append-only: no update/delete policy exists at all, for anyone, on
+-- purpose — see migration 006 for why. A mistake gets corrected with a new
+-- entry and a remark, never by editing history.
+create policy "financials-permitted staff can view their branch bank ledger" on bank_ledger_entries for select
+  using (branch_id = current_staff_branch() and current_staff_financials_ok());
+create policy "financials-permitted staff can add to their branch bank ledger" on bank_ledger_entries for insert
+  with check (branch_id = current_staff_branch() and current_staff_financials_ok());
 
 alter table staff enable row level security;
 create policy "staff can access their branch staff" on staff for all

@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { LayoutGrid, ClipboardList, ChefHat, Receipt, Clock, BookOpen, Boxes, Truck, Users, UserCog, BarChart3, Settings, MoreHorizontal, X, Keyboard, LogOut } from 'lucide-react'
+import { LayoutGrid, ClipboardList, ChefHat, Receipt, Clock, BookOpen, Boxes, Truck, Users, UserCog, BarChart3, Settings, MoreHorizontal, X, Keyboard, LogOut, Landmark } from 'lucide-react'
 import { NotificationBell } from './NotificationBell'
 import { ShortcutsHelpModal } from './ShortcutsHelpModal'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
@@ -18,20 +18,27 @@ const NAV = [
   { to: '/customers', label: 'Customers', icon: Users },
   { to: '/staff', label: 'Staff', icon: UserCog },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
+  // financialsOnly items are filtered out below for anyone without that
+  // permission — this is UX only (so it's not a dead end to tap), the real
+  // enforcement is the RLS policy on bank_ledger_entries itself.
+  { to: '/bank', label: 'Bank', icon: Landmark, financialsOnly: true },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
 // A phone screen can comfortably hold ~4 bottom-nav items before it stops
 // being fast to use — everything past that goes under "More" instead of
 // making every icon smaller to force-fit.
-const PRIMARY = NAV.slice(0, 4)
-const OVERFLOW = NAV.slice(4)
+const PRIMARY_COUNT = 4
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [moreOpen, setMoreOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const location = useLocation()
-  const overflowActive = OVERFLOW.some((item) => item.to === location.pathname)
+  const canSeeFinancials = useAuthStore((s) => s.staff?.permissions.financials ?? false)
+  const nav = NAV.filter((item) => !item.financialsOnly || canSeeFinancials)
+  const primary = nav.slice(0, PRIMARY_COUNT)
+  const overflow = nav.slice(PRIMARY_COUNT)
+  const overflowActive = overflow.some((item) => item.to === location.pathname)
   useKeyboardShortcuts(() => setShortcutsOpen(true))
 
   return (
@@ -48,7 +55,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
         <nav className="flex-1 px-3 space-y-1">
-          {NAV.map(({ to, label, icon: Icon }) => (
+          {nav.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
@@ -77,7 +84,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         {/* Mobile bottom nav — 4 primary items + More */}
         <nav className="md:hidden fixed bottom-0 inset-x-0 bg-surface border-t border-ink/5 flex justify-around py-1.5 pb-[env(safe-area-inset-bottom)] z-30 print:hidden">
-          {PRIMARY.map(({ to, label, icon: Icon }) => (
+          {primary.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
@@ -117,7 +124,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </button>
               </div>
               <div className="grid grid-cols-3 gap-2">
-                {OVERFLOW.map(({ to, label, icon: Icon }) => (
+                {overflow.map(({ to, label, icon: Icon }) => (
                   <NavLink
                     key={to}
                     to={to}

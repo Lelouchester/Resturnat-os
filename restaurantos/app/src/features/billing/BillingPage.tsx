@@ -42,6 +42,7 @@ export function BillingPage() {
   const mergeOrders = useOrdersStore((s) => s.mergeOrders)
   const unmergeOrder = useOrdersStore((s) => s.unmergeOrder)
   const completePayment = useOrdersStore((s) => s.completePayment)
+  const attachCustomer = useOrdersStore((s) => s.attachCustomer)
   const initTables = useTablesStore((s) => s.init)
 
   useEffect(() => {
@@ -215,6 +216,7 @@ export function BillingPage() {
     const id = await addCustomer(customerSearch.trim() || undefined, undefined)
     setCustomerId(id)
     setPickerOpen(false)
+    if (order) attachCustomer(order.tableId, id)
   }
 
   const matchingCustomers = useMemo(() => {
@@ -357,7 +359,15 @@ export function BillingPage() {
               <span className="font-semibold">{selectedCustomer.name || 'Walk-in customer'}</span>
               {selectedCustomer.phone && <span className="text-ink/40 ml-1.5">{selectedCustomer.phone}</span>}
             </div>
-            <button onClick={() => setCustomerId(null)} className="text-ink/40 hover:text-status-cleaning"><X size={16} /></button>
+            <button
+              onClick={() => {
+                setCustomerId(null)
+                if (order) attachCustomer(order.tableId, null)
+              }}
+              className="text-ink/40 hover:text-status-cleaning"
+            >
+              <X size={16} />
+            </button>
           </div>
         ) : !pickerOpen ? (
           <button onClick={() => setPickerOpen(true)} className="flex items-center gap-2 text-sm text-ink/50">
@@ -380,7 +390,14 @@ export function BillingPage() {
               {matchingCustomers.map((c) => (
                 <button
                   key={c.id}
-                  onClick={() => { setCustomerId(c.id); setPickerOpen(false) }}
+                  onClick={() => {
+                    setCustomerId(c.id)
+                    setPickerOpen(false)
+                    // Persist immediately, not just at final payment — walking
+                    // away to the floor plan and back must not lose this, same
+                    // fix as the Orders tab's assign-customer flow.
+                    if (order) attachCustomer(order.tableId, c.id)
+                  }}
                   className="w-full text-left text-sm rounded-lg px-2 py-1.5 hover:bg-ink/5"
                 >
                   {c.name || 'Walk-in customer'} {c.phone && <span className="text-ink/40">— {c.phone}</span>}
