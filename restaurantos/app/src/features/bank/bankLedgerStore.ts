@@ -10,6 +10,19 @@ export interface BankLedgerEntry {
   remark: string
   createdByName: string
   createdAt: string
+  source: string | null // null = manual entry; 'fonepay_revenue' / 'fonepay_purchases' = posted automatically overnight
+  editedAt: string | null
+  deletedAt: string | null
+  deletedByName: string | null
+}
+
+export interface BankLedgerHistoryEntry {
+  changeType: 'edit' | 'delete'
+  previousEntryDate: string
+  previousAmount: number
+  previousRemark: string
+  changedByName: string
+  changedAt: string
 }
 
 interface BankLedgerState {
@@ -18,12 +31,15 @@ interface BankLedgerState {
   initialized: boolean
   init: () => void
   addEntry: (entryDate: string, amount: number, remark: string) => Promise<{ ok: boolean; error?: string }>
+  editEntry: (entryId: string, entryDate: string, amount: number, remark: string) => Promise<{ ok: boolean; error?: string }>
+  deleteEntry: (entryId: string) => Promise<{ ok: boolean; error?: string }>
+  fetchHistory: (entryId: string) => Promise<BankLedgerHistoryEntry[]>
 }
 
 async function loadEntries(): Promise<BankLedgerEntry[]> {
   const { data, error } = await supabase
     .from('bank_ledger_entries')
-    .select('id, entry_date, amount, remark, created_at, staff ( name )')
+    .select('id, entry_date, amount, remark, created_at, source, edited_at, deleted_at, staff:created_by ( name ), deleted_staff:deleted_by ( name )')
     .eq('branch_id', currentBranchId())
     .order('entry_date', { ascending: true })
     .order('created_at', { ascending: true })
@@ -41,8 +57,12 @@ async function loadEntries(): Promise<BankLedgerEntry[]> {
     entryDate: row.entry_date,
     amount: Number(row.amount),
     remark: row.remark,
-    createdByName: row.staff?.name ?? 'Unknown',
+    createdByName: row.staff?.name ?? (row.source ? 'Fonepay (auto)' : 'Unknown'),
     createdAt: row.created_at,
+    source: row.source ?? null,
+    editedAt: row.edited_at ?? null,
+    deletedAt: row.deleted_at ?? null,
+    deletedByName: row.deleted_staff?.name ?? null,
   }))
 }
 
@@ -67,10 +87,10 @@ export const useBankLedgerStore = create<BankLedgerState>((set, get) => ({
       .subscribe()
   },
 
-  // Deliberately insert-only — there's no updateEntry or deleteEntry here on
-  // purpose, matching the database (no update/delete policy exists at all).
-  // A mistake gets corrected with a new entry and a remark explaining it,
-  // never by editing history.
+  // Direct insert for new entries; editing and deleting an existing one go
+  // through database functions instead (below), never a direct update/
+  // delete — that's what guarantees the history log always gets written,
+  // no matter what.
   addEntry: async (entryDate, amount, remark) => {
     const { error } = await supabase.from('bank_ledger_entries').insert({
       branch_id: currentBranchId(),
@@ -85,5 +105,50 @@ export const useBankLedgerStore = create<BankLedgerState>((set, get) => ({
     }
     set({ entries: await loadEntries() })
     return { ok: true }
+  },
+
+  editEntry: async (entryId, entryDate, amount, remark) => {
+    const { error } = await supabase.rpc('edit_bank_ledger_entry', {
+      p_entry_id: entryId,
+      p_new_entry_date: entryDate,
+      p_new_amount: amount,
+      p_new_remark: remark,
+    })
+    if (error) {
+      console.error('[bankLedgerStore] editEntry failed', error)
+      return { ok: false, error: error.message }
+    }
+    set({ entries: await loadEntries() })
+    return { ok: true }
+  },
+
+  deleteEntry: async (entryId) => {
+    const { error } = await supabase.rpc('delete_bank_ledger_entry', { p_entry_id: entryId })
+    if (error) {
+      console.error('[bankLedgerStore] deleteEntry failed', error)
+      return { ok: false, error: error.message }
+    }
+    set({ entries: await loadEntries() })
+    return { ok: true }
+  },
+
+  fetchHistory: async (entryId) => {
+    const { data, error } = await supabase
+      .from('bank_ledger_entry_history')
+      .select('change_type, previous_entry_date, previous_amount, previous_remark, changed_at, staff:changed_by ( name )')
+      .eq('entry_id', entryId)
+      .order('changed_at', { ascending: true })
+    if (error) {
+      console.error('[bankLedgerStore] fetchHistory failed', error)
+      return []
+    }
+    return (data ?? []).map((row: any) => ({
+      changeType: row.change_type,
+      previousEntryDate: row.previous_entry_date,
+      previousAmount: Number(row.previous_amount),
+      previousRemark: row.previous_remark,
+      changedByName: row.staff?.name ?? 'Unknown',
+      changedAt: row.changed_at,
+    }))
   },
 }))
