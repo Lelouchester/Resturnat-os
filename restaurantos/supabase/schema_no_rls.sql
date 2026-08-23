@@ -843,8 +843,179 @@ create table bank_ledger_entries (
   amount numeric(12,2) not null,
   remark text not null,
   created_by uuid references staff(id),
-  created_at timestamptz default now()
+  created_at timestamptz default now(),
+  source text, -- null = manual entry; 'fonepay_revenue' / 'fonepay_purchases' = posted automatically overnight
+  edited_at timestamptz,
+  edited_by uuid references staff(id),
+  deleted_at timestamptz, -- soft delete: flagged, never actually removed
+  deleted_by uuid references staff(id)
 );
+
+create unique index bank_ledger_fonepay_unique on bank_ledger_entries(branch_id, entry_date, source) where source is not null;
+
+-- Every previous version of an edited or deleted bank_ledger_entries row,
+-- written here BEFORE the change lands — see migration 008. Only the two
+-- functions below ever write to this table.
+create table bank_ledger_entry_history (
+  id uuid primary key default uuid_generate_v4(),
+  entry_id uuid references bank_ledger_entries(id) on delete cascade,
+  branch_id uuid references branches(id) on delete cascade,
+  change_type text not null,
+  previous_entry_date date not null,
+  previous_amount numeric(12,2) not null,
+  previous_remark text not null,
+  changed_by uuid references staff(id),
+  changed_at timestamptz default now()
+);
+
+create or replace function edit_bank_ledger_entry(p_entry_id uuid, p_new_entry_date date, p_new_amount numeric, p_new_remark text)
+returns void
+language plpgsql security definer as $$
+declare
+  v_staff_id uuid;
+  v_branch_id uuid;
+  v_entry bank_ledger_entries%rowtype;
+begin
+  select id into v_staff_id from staff where auth_user_id = auth.uid() and is_active limit 1;
+  if v_staff_id is null then
+    raise exception 'no active staff record for caller';
+  end if;
+  if not current_staff_financials_ok() then
+    raise exception 'not permitted to edit the bank ledger';
+  end if;
+
+  v_branch_id := current_staff_branch();
+
+  select * into v_entry from bank_ledger_entries where id = p_entry_id and branch_id = v_branch_id;
+  if v_entry.id is null then
+    raise exception 'entry not found';
+  end if;
+  if v_entry.deleted_at is not null then
+    raise exception 'this entry was deleted — add a new entry instead of editing a deleted one';
+  end if;
+  if p_new_remark is null or length(trim(p_new_remark)) = 0 then
+    raise exception 'a remark is required';
+  end if;
+
+  insert into bank_ledger_entry_history (entry_id, branch_id, change_type, previous_entry_date, previous_amount, previous_remark, changed_by)
+  values (p_entry_id, v_branch_id, 'edit', v_entry.entry_date, v_entry.amount, v_entry.remark, v_staff_id);
+
+  update bank_ledger_entries
+  set entry_date = p_new_entry_date, amount = p_new_amount, remark = trim(p_new_remark), edited_at = now(), edited_by = v_staff_id
+  where id = p_entry_id;
+end;
+$$;
+
+grant execute on function edit_bank_ledger_entry(uuid, date, numeric, text) to authenticated;
+
+create or replace function delete_bank_ledger_entry(p_entry_id uuid)
+returns void
+language plpgsql security definer as $$
+declare
+  v_staff_id uuid;
+  v_branch_id uuid;
+  v_entry bank_ledger_entries%rowtype;
+begin
+  select id into v_staff_id from staff where auth_user_id = auth.uid() and is_active limit 1;
+  if v_staff_id is null then
+    raise exception 'no active staff record for caller';
+  end if;
+  if not current_staff_financials_ok() then
+    raise exception 'not permitted to remove entries from the bank ledger';
+  end if;
+
+  v_branch_id := current_staff_branch();
+
+  select * into v_entry from bank_ledger_entries where id = p_entry_id and branch_id = v_branch_id;
+  if v_entry.id is null then
+    raise exception 'entry not found';
+  end if;
+  if v_entry.deleted_at is not null then
+    raise exception 'already deleted';
+  end if;
+
+  insert into bank_ledger_entry_history (entry_id, branch_id, change_type, previous_entry_date, previous_amount, previous_remark, changed_by)
+  values (p_entry_id, v_branch_id, 'delete', v_entry.entry_date, v_entry.amount, v_entry.remark, v_staff_id);
+
+  update bank_ledger_entries set deleted_at = now(), deleted_by = v_staff_id where id = p_entry_id;
+end;
+$$;
+
+grant execute on function delete_bank_ledger_entry(uuid) to authenticated;
+
+-- ----------------------------------------------------------------------------
+-- Automatic daily Fonepay bank settlement — see migration 007 for full
+-- comments. Fonepay pays out to the real bank as one lump sum per day
+-- rather than per-transaction, so this posts once daily rather than
+-- reacting to each individual payment. These entries land in the same
+-- append-only ledger as manual ones, tagged with 'source' so the app can
+-- show which is which, but follow the exact same rule: once posted, never
+-- edited or deleted.
+-- ----------------------------------------------------------------------------
+
+create extension if not exists pg_cron;
+
+create or replace function post_daily_fonepay_entries_for_branch(p_branch_id uuid, p_for_date date)
+returns void
+language plpgsql security definer as $$
+declare
+  v_revenue numeric;
+  v_purchases numeric;
+begin
+  select coalesce(sum(p.amount), 0) into v_revenue
+  from payments p
+  join orders o on o.id = p.order_id
+  join payment_methods pm on pm.id = p.payment_method_id
+  where o.branch_id = p_branch_id
+    and o.status = 'paid'
+    and pm.key = 'fonepay'
+    and (o.closed_at at time zone 'Asia/Kathmandu')::date = p_for_date;
+
+  select coalesce(sum(pp.amount), 0) into v_purchases
+  from purchase_payments pp
+  join purchases pu on pu.id = pp.purchase_id
+  join payment_methods pm on pm.id = pp.payment_method_id
+  where pu.branch_id = p_branch_id
+    and pu.status <> 'cancelled'
+    and pm.key = 'fonepay'
+    and (pu.created_at at time zone 'Asia/Kathmandu')::date = p_for_date;
+
+  if v_revenue > 0 then
+    insert into bank_ledger_entries (branch_id, entry_date, amount, remark, source)
+    values (p_branch_id, p_for_date, v_revenue, 'Fonepay settlement — ' || to_char(p_for_date, 'DD Mon YYYY'), 'fonepay_revenue')
+    on conflict (branch_id, entry_date, source) where source is not null do nothing;
+  end if;
+
+  if v_purchases > 0 then
+    insert into bank_ledger_entries (branch_id, entry_date, amount, remark, source)
+    values (p_branch_id, p_for_date, -v_purchases, 'Fonepay purchases — ' || to_char(p_for_date, 'DD Mon YYYY'), 'fonepay_purchases')
+    on conflict (branch_id, entry_date, source) where source is not null do nothing;
+  end if;
+end;
+$$;
+
+create or replace function post_daily_fonepay_entries()
+returns void
+language plpgsql security definer as $$
+declare
+  v_branch record;
+  v_for_date date := ((now() at time zone 'Asia/Kathmandu')::date - 1);
+begin
+  for v_branch in select id from branches loop
+    perform post_daily_fonepay_entries_for_branch(v_branch.id, v_for_date);
+  end loop;
+end;
+$$;
+
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'post-daily-fonepay-entries') then
+    perform cron.unschedule('post-daily-fonepay-entries');
+  end if;
+end $$;
+
+select cron.schedule('post-daily-fonepay-entries', '45 18 * * *', $$select post_daily_fonepay_entries();$$);
+
 
 
 
