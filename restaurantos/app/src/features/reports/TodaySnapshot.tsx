@@ -23,7 +23,7 @@ export function TodaySnapshot() {
 
   const todayStr = new Date().toDateString()
   const purchasesToday = useMemo(
-    () => purchases.filter((p) => new Date(p.createdAt).toDateString() === todayStr),
+    () => purchases.filter((p) => new Date(p.createdAt).toDateString() === todayStr && p.status !== 'cancelled'),
     [purchases, todayStr]
   )
   const purchasesTotal = purchasesToday.reduce((sum, p) => sum + p.lines.reduce((s, l) => s + l.quantity * l.unitCost, 0), 0)
