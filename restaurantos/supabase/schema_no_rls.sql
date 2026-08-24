@@ -304,7 +304,8 @@ create table orders (
   total numeric(10,2) default 0,
   split_guest_count integer default 1, -- >1 means the bill was split evenly this many ways
   opened_at timestamptz default now(),
-  closed_at timestamptz
+  closed_at timestamptz,
+  activity_note text -- e.g. "Transferred from Table 1", "Merged with Table 3's order" — set at transfer/merge time
 );
 
 create table order_items (
