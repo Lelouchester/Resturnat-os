@@ -182,6 +182,7 @@ export interface Visit {
   date: string
   amount: number
   itemsSummary: string
+  activityNote?: string
 }
 
 // Fetched on demand when a customer's detail view opens — their real order
@@ -189,7 +190,7 @@ export interface Visit {
 export async function fetchCustomerVisits(customerId: string): Promise<{ visits: Visit[]; favoriteItem?: string }> {
   const { data, error } = await supabase
     .from('orders')
-    .select('id, closed_at, total, order_items ( quantity, custom_name, is_complimentary, status, menu_items ( name ) )')
+    .select('id, closed_at, total, activity_note, order_items ( quantity, custom_name, is_complimentary, status, menu_items ( name ) )')
     .eq('customer_id', customerId)
     .eq('status', 'paid')
     .order('closed_at', { ascending: false })
@@ -212,6 +213,7 @@ export async function fetchCustomerVisits(customerId: string): Promise<{ visits:
       date: o.closed_at,
       amount: Number(o.total) || 0,
       itemsSummary: activeItems.map((i: any) => `${i.quantity}x ${i.custom_name ?? i.menu_items?.name ?? 'Item'}`).join(', '),
+      activityNote: o.activity_note ?? undefined,
     }
   })
 

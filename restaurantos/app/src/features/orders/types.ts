@@ -52,5 +52,6 @@ export interface LiveOrder {
   splitGuestCount: number
   openedAt: string
   closedAt?: string
+  activityNote?: string // e.g. "Transferred from Table 1", "Merged with Table 3's order" — set at transfer/merge time
   items: OrderItemRow[]
 }

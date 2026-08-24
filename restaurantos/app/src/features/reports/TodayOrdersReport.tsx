@@ -41,6 +41,9 @@ export function TodayOrdersReport() {
                   <span className="text-ink/30 font-normal text-xs">{new Date(o.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
                 <div className="text-xs text-ink/50 truncate">{o.itemsSummary}</div>
+                {o.activityNote && (
+                  <div className="text-[11px] text-ink/35 italic mt-0.5">{o.activityNote}</div>
+                )}
               </div>
               <div className="flex items-center gap-3 shrink-0">
                 <span className="font-ticket font-bold text-sm">Rs. {o.total}</span>

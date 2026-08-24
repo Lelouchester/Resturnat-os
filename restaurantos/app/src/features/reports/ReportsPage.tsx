@@ -9,6 +9,7 @@ import { useReportsData, type ReportRange } from './useReportsData'
 import { TodaySnapshot } from './TodaySnapshot'
 import { ItemUsageReport } from './ItemUsageReport'
 import { TodayOrdersReport } from './TodayOrdersReport'
+import { RevenueVsPurchasesCard } from './RevenueVsPurchasesCard'
 import { useInventoryStore } from '../inventory/inventoryStore'
 import { useCustomersStore } from '../customers/customersStore'
 import { useAuthStore } from '../auth/authStore'
@@ -26,7 +27,7 @@ export function ReportsPage() {
   // multi-range, chart-heavy view for actually analyzing trends. Different
   // audiences, different jobs — kept as two clearly separate views rather
   // than merging them into one increasingly busy page.
-  const [view, setView] = useState<'today' | 'detailed' | 'usage' | 'orders'>('today')
+  const [view, setView] = useState<'today' | 'detailed' | 'usage' | 'orders' | 'trends'>('today')
 
   const inventoryItems = useInventoryStore((s) => s.items)
   const initInventory = useInventoryStore((s) => s.init)
@@ -57,7 +58,7 @@ export function ReportsPage() {
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div>
           <h1 className="font-ticket text-xl font-bold">Reports</h1>
-          <p className="text-sm text-ink/50">{view === 'today' ? "A quick look at today" : view === 'usage' ? 'Purchased vs. sold, for linked items' : view === 'orders' ? "Today's billed orders" : 'Sales, performance, and business insights'}</p>
+          <p className="text-sm text-ink/50">{view === 'today' ? "A quick look at today" : view === 'usage' ? 'Purchased vs. sold, for linked items' : view === 'orders' ? "Today's billed orders" : view === 'trends' ? 'Revenue vs. purchases, at a glance' : 'Sales, performance, and business insights'}</p>
         </div>
         <div className="flex gap-1 bg-surface border border-ink/10 rounded-xl p-1">
           <button
@@ -65,6 +66,12 @@ export function ReportsPage() {
             className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${view === 'today' ? 'bg-ink text-paper' : 'text-ink/50'}`}
           >
             Today's Snapshot
+          </button>
+          <button
+            onClick={() => setView('trends')}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${view === 'trends' ? 'bg-ink text-paper' : 'text-ink/50'}`}
+          >
+            Trends
           </button>
           <button
             onClick={() => setView('detailed')}
@@ -93,6 +100,8 @@ export function ReportsPage() {
         <ItemUsageReport />
       ) : view === 'orders' ? (
         <TodayOrdersReport />
+      ) : view === 'trends' ? (
+        <RevenueVsPurchasesCard />
       ) : (
         <>
       <div className="flex items-center justify-end mb-4">

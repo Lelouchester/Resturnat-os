@@ -61,7 +61,7 @@ interface OrdersState {
 const ORDER_SELECT = `
   id, table_id, shift_id, waiter_id, customer_id, status, merged_into_order_id,
   subtotal, discount_amount, service_charge, tax_amount, tip_amount, total, split_guest_count,
-  opened_at, closed_at,
+  opened_at, closed_at, activity_note,
   restaurant_tables ( label ),
   order_items ( id, menu_item_id, custom_name, quantity, unit_price, note, status, is_complimentary, void_reason, created_at, kot_printed_at, menu_items ( name, menu_categories ( exclude_from_discount ) ) )
 `
@@ -103,6 +103,7 @@ function mapOrderRow(row: any): LiveOrder {
     splitGuestCount: row.split_guest_count ?? 1,
     openedAt: row.opened_at,
     closedAt: row.closed_at ?? undefined,
+    activityNote: row.activity_note ?? undefined,
     items,
   }
 }
@@ -349,7 +350,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
 
     const { error: tableErr } = await supabase
       .from('restaurant_tables')
-      .update({ status: 'needs_cleaning', customer_name: null, guest_count: null, seated_at: null, note: null })
+      .update({ status: 'needs_cleaning', customer_name: null, customer_phone: null, customer_id: null, guest_count: null, seated_at: null, note: null })
       .eq('id', tableId)
     if (tableErr) console.error('[ordersStore] cancelOrder: freeing table failed', tableErr)
 
@@ -386,7 +387,14 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     const fromTable = useTablesStore.getState().tables.find((t) => t.id === fromTableId)
     if (!order || !fromTable) return
 
-    const { error: orderErr } = await supabase.from('orders').update({ table_id: toTableId }).eq('id', order.id)
+    // A short, human-readable trail — so a due or a total that looks odd
+    // in a report later can be traced back to "oh, this table's group
+    // actually moved partway through" instead of looking like a mistake.
+    const note = order.activityNote
+      ? `${order.activityNote}; Transferred from ${fromTable.label}`
+      : `Transferred from ${fromTable.label}`
+
+    const { error: orderErr } = await supabase.from('orders').update({ table_id: toTableId, activity_note: note }).eq('id', order.id)
     if (orderErr) {
       console.error('[ordersStore] transferOrderTable (order move) failed', orderErr)
       return
@@ -406,7 +414,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
 
     await supabase
       .from('restaurant_tables')
-      .update({ status: 'needs_cleaning', customer_name: null, guest_count: null, seated_at: null, note: null })
+      .update({ status: 'needs_cleaning', customer_name: null, customer_phone: null, customer_id: null, guest_count: null, seated_at: null, note: null })
       .eq('id', fromTableId)
 
     set({ orders: await loadOpenOrders() })
@@ -415,6 +423,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
   mergeOrders: async (fromTableId, intoTableId) => {
     const fromOrder = get().getOrderForTable(fromTableId)
     const intoOrder = get().getOrderForTable(intoTableId)
+    const fromTable = useTablesStore.getState().tables.find((t) => t.id === fromTableId)
     if (!fromOrder || !intoOrder) return
 
     // Merging into a table that's itself already merged elsewhere, or
@@ -433,6 +442,14 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       console.error('[ordersStore] mergeOrders failed', error)
       return
     }
+
+    if (fromTable) {
+      const note = root.activityNote
+        ? `${root.activityNote}; Merged with ${fromTable.label}'s order`
+        : `Merged with ${fromTable.label}'s order`
+      await supabase.from('orders').update({ activity_note: note }).eq('id', root.id)
+    }
+
     set({ orders: await loadOpenOrders() })
   },
 
@@ -514,7 +531,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     if (tableIds.length > 0) {
       const { error: tableErr } = await supabase
         .from('restaurant_tables')
-        .update({ status: 'needs_cleaning', customer_name: null, guest_count: null, seated_at: null, note: null })
+        .update({ status: 'needs_cleaning', customer_name: null, customer_phone: null, customer_id: null, guest_count: null, seated_at: null, note: null })
         .in('id', tableIds)
       if (tableErr) console.error('[ordersStore] completePayment: freeing tables failed', tableErr)
     }

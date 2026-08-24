@@ -33,7 +33,7 @@ export function useShiftLedger(shiftId: string | undefined, openedAt: string | u
     const [{ data, error }, { data: salesData, error: salesErr }] = await Promise.all([
       supabase
         .from('ledger_entries')
-        .select('amount, reason, order_id, accounts!inner ( branch_id, payment_methods ( key ) )')
+        .select('amount, reason, order_id, purchase_id, accounts!inner ( branch_id, payment_methods ( key ) )')
         .eq('accounts.branch_id', currentBranchId())
         .gte('created_at', openedAt),
       supabase.from('orders').select('total').eq('shift_id', shiftId).eq('status', 'paid'),
@@ -49,14 +49,28 @@ export function useShiftLedger(shiftId: string | undefined, openedAt: string | u
       if (!key) continue
       if (!next[key]) next[key] = { revenue: 0, purchases: 0 }
       const amount = Number(row.amount)
-      // Bucket by sign, not by exact reason string — money in is revenue
-      // (order payments, dues settled), money out is a purchase, regardless
-      // of which of purchasing's several reason labels wrote it.
-      if (amount >= 0) {
+      // Anything tied to a purchase or an order gets bucketed by that,
+      // not by sign — sign-based bucketing broke the moment cancellations
+      // existed: a cancelled order's reversal is a *negative* amount but
+      // is still revenue being undone, and a cancelled purchase's reversal
+      // is a *positive* amount but is still a purchase being undone.
+      // Everything else here (a due settled later, a direct supplier
+      // payment, a manual balance correction) was never subject to that
+      // problem — it's a one-off entry, never reversed — so sign is still
+      // a reliable signal for those, same as before.
+      if (row.purchase_id) {
+        // Genuine purchase spend is recorded as a negative amount, a
+        // cancellation reversal as positive — flip sign so this reads as
+        // a normal positive "amount spent" figure, correctly shrinking
+        // toward zero as reversals net against it.
+        next[key].purchases += -amount
+      } else if (row.order_id) {
         next[key].revenue += amount
-        if (row.order_id) paidOrderIds.add(row.order_id)
+        if (amount > 0) paidOrderIds.add(row.order_id)
+      } else if (amount >= 0) {
+        next[key].revenue += amount
       } else {
-        next[key].purchases += Math.abs(amount)
+        next[key].purchases += -amount
       }
     }
     setByMethod(next)

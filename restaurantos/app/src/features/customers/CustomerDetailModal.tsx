@@ -215,6 +215,7 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
                     <div className="min-w-0">
                       <div className="text-xs text-ink/40">{new Date(v.date).toLocaleDateString()}</div>
                       <div className="text-xs text-ink/50">{v.itemsSummary}</div>
+                      {v.activityNote && <div className="text-[11px] text-ink/35 italic">{v.activityNote}</div>}
                       <div className="flex items-center gap-3 mt-1">
                         <button
                           onClick={() => repeatOrder(v.itemsSummary)}
