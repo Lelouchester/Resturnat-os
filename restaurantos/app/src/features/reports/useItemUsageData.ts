@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../shared/lib/supabase'
 
-export type UsagePeriod = 'week' | 'month'
+export type UsagePeriod = 'week' | 'month' | 'custom'
 
 export interface ItemUsageRow {
   inventoryItemId: string
@@ -14,14 +14,6 @@ export interface ItemUsageRow {
   soldBreakdown: { menuItemName: string; qty: number; revenue: number }[]
 }
 
-function rangeStart(period: UsagePeriod): Date {
-  const d = new Date()
-  d.setHours(0, 0, 0, 0)
-  if (period === 'week') d.setDate(d.getDate() - 6)
-  else d.setDate(d.getDate() - 29)
-  return d
-}
-
 /**
  * Purchased-vs-sold comparison for inventory items that have been linked to
  * menu items (Inventory > edit item > "Used in these menu items"). Purely a
@@ -29,7 +21,7 @@ function rangeStart(period: UsagePeriod): Date {
  * or incomplete set of links can't corrupt any real stock number.
  */
 export function useItemUsageData(
-  period: UsagePeriod,
+  range: { from: string; to: string }, // yyyy-mm-dd, inclusive both ends
   itemsWithLinks: { id: string; name: string; unit: string; linkedMenuItemIds: string[] }[],
   menuItemNames: Record<string, string>
 ) {
@@ -47,7 +39,8 @@ export function useItemUsageData(
       }
       setLoading(true)
 
-      const from = rangeStart(period).toISOString()
+      const from = `${range.from}T00:00:00`
+      const to = `${range.to}T23:59:59`
       const inventoryIds = itemsWithLinks.map((i) => i.id)
       const allMenuIds = Array.from(new Set(itemsWithLinks.flatMap((i) => i.linkedMenuItemIds)))
 
@@ -58,7 +51,8 @@ export function useItemUsageData(
           .in('inventory_item_id', inventoryIds)
           .eq('kind', 'inventory')
           .neq('purchases.status', 'cancelled')
-          .gte('purchases.created_at', from),
+          .gte('purchases.created_at', from)
+          .lte('purchases.created_at', to),
         allMenuIds.length > 0
           ? supabase
               .from('order_items')
@@ -67,6 +61,7 @@ export function useItemUsageData(
               .neq('status', 'void')
               .eq('orders.status', 'paid')
               .gte('orders.closed_at', from)
+              .lte('orders.closed_at', to)
           : Promise.resolve({ data: [], error: null }),
       ])
 
@@ -122,7 +117,7 @@ export function useItemUsageData(
     return () => {
       cancelled = true
     }
-  }, [period, JSON.stringify(itemsWithLinks), JSON.stringify(menuItemNames)])
+  }, [range.from, range.to, JSON.stringify(itemsWithLinks), JSON.stringify(menuItemNames)])
 
   return { rows, loading }
 }

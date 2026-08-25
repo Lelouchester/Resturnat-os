@@ -123,6 +123,11 @@ async function loadOpenOrders(): Promise<LiveOrder[]> {
   return (data ?? []).map(mapOrderRow)
 }
 
+// Guards startOrGetOrder against creating two orders for the same table if
+// it's called twice before the first insert finishes — see the comment
+// inside startOrGetOrder for why this matters on a slow connection.
+const pendingOrderCreation = new Map<string, Promise<string>>()
+
 export const useOrdersStore = create<OrdersState>((set, get) => ({
   orders: [],
   loading: true,
@@ -162,17 +167,27 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     const existing = get().getOrderForTable(tableId)
     if (existing) return existing.id
 
-    const shiftId = useShiftStore.getState().shift?.id
-    // A customer may already have been assigned to this table before any
-    // items were added (tapping the table and picking a name first) — carry
-    // that over onto the order now, or it's otherwise never linked, since
-    // this insert is the only place the order's customer_id gets set at
-    // creation time.
-    const table = useTablesStore.getState().tables.find((t) => t.id === tableId)
-    const { data, error } = await supabase
-      .from('orders')
-      .insert({
-        branch_id: currentBranchId(),
+    // A second call for the same table arriving before the first one's
+    // insert has finished (a double-tap on a slow mobile connection is the
+    // classic way this happens) would otherwise both see "no order yet"
+    // and each create their own — silently splitting one table's items
+    // across two separate orders. Whoever's second waits for the first's
+    // insert instead of racing it.
+    const inFlight = pendingOrderCreation.get(tableId)
+    if (inFlight) return inFlight
+
+    const creation = (async () => {
+      const shiftId = useShiftStore.getState().shift?.id
+      // A customer may already have been assigned to this table before any
+      // items were added (tapping the table and picking a name first) — carry
+      // that over onto the order now, or it's otherwise never linked, since
+      // this insert is the only place the order's customer_id gets set at
+      // creation time.
+      const table = useTablesStore.getState().tables.find((t) => t.id === tableId)
+      const { data, error } = await supabase
+        .from('orders')
+        .insert({
+          branch_id: currentBranchId(),
         table_id: tableId,
         shift_id: shiftId ?? null,
         waiter_id: useAuthStore.getState().staff?.id ?? null,
@@ -196,8 +211,16 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       .eq('id', tableId)
       .in('status', ['available', 'needs_cleaning'])
 
-    set({ orders: await loadOpenOrders() })
-    return data.id
+      set({ orders: await loadOpenOrders() })
+      return data.id
+    })()
+
+    pendingOrderCreation.set(tableId, creation)
+    try {
+      return await creation
+    } finally {
+      pendingOrderCreation.delete(tableId)
+    }
   },
 
   sendItemsToKitchen: async (tableId, lines) => {

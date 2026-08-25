@@ -1,12 +1,31 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import { Card } from '../../shared/ui/Card'
 import { usePurchaseTrendsData, type TrendRange } from './usePurchaseTrendsData'
 
-const RANGES: TrendRange[] = ['7 days', '30 days', '90 days']
+const RANGES: TrendRange[] = ['7 days', '30 days', '90 days', 'custom']
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10)
+}
+function daysAgoISO(days: number) {
+  const d = new Date()
+  d.setDate(d.getDate() - days)
+  return d.toISOString().slice(0, 10)
+}
 
 export function PurchaseTrendsView() {
-  const [range, setRange] = useState<TrendRange>('30 days')
+  const [preset, setPreset] = useState<TrendRange>('30 days')
+  const [customFrom, setCustomFrom] = useState(() => daysAgoISO(29))
+  const [customTo, setCustomTo] = useState(todayISO())
+
+  const range = useMemo(() => {
+    if (preset === '7 days') return { from: daysAgoISO(6), to: todayISO() }
+    if (preset === '30 days') return { from: daysAgoISO(29), to: todayISO() }
+    if (preset === '90 days') return { from: daysAgoISO(89), to: todayISO() }
+    return { from: customFrom, to: customTo }
+  }, [preset, customFrom, customTo])
+
   const { data, loading } = usePurchaseTrendsData(range)
 
   return (
@@ -16,14 +35,27 @@ export function PurchaseTrendsView() {
           {RANGES.map((r) => (
             <button
               key={r}
-              onClick={() => setRange(r)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${range === r ? 'bg-ink text-paper' : 'text-ink/50'}`}
+              onClick={() => setPreset(r)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${preset === r ? 'bg-ink text-paper' : 'text-ink/50'}`}
             >
-              {r}
+              {r === 'custom' ? 'Custom' : r}
             </button>
           ))}
         </div>
       </div>
+
+      {preset === 'custom' && (
+        <div className="flex items-center gap-2 mb-4 justify-end">
+          <div>
+            <label className="text-[10px] font-semibold text-ink/40 block">From</label>
+            <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="text-xs border border-ink/10 rounded-lg px-2 py-1 outline-none focus:border-ember" />
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold text-ink/40 block">To</label>
+            <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="text-xs border border-ink/10 rounded-lg px-2 py-1 outline-none focus:border-ember" />
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-3">

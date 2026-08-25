@@ -5,6 +5,15 @@ import { useMenuLinksStore } from '../inventory/menuLinksStore'
 import { useMenuStore } from '../menu/menuStore'
 import { useItemUsageData, type UsagePeriod } from './useItemUsageData'
 
+function todayISO() {
+  return new Date().toISOString().slice(0, 10)
+}
+function daysAgoISO(days: number) {
+  const d = new Date()
+  d.setDate(d.getDate() - days)
+  return d.toISOString().slice(0, 10)
+}
+
 export function ItemUsageReport() {
   const inventoryItems = useInventoryStore((s) => s.items)
   const initInventory = useInventoryStore((s) => s.init)
@@ -20,6 +29,19 @@ export function ItemUsageReport() {
   }, [initInventory, initMenuLinks, initMenu])
 
   const [period, setPeriod] = useState<UsagePeriod>('week')
+  const [customFrom, setCustomFrom] = useState(() => daysAgoISO(6))
+  const [customTo, setCustomTo] = useState(todayISO())
+
+  // Presets are just a shortcut for picking the same from/to range a manual
+  // pick would produce — the hook always gets an explicit range either way,
+  // so "This week" and manually typing the same two dates give identical
+  // results, which is exactly what lets you cross-check this against
+  // another screen by matching the range exactly.
+  const range = useMemo(() => {
+    if (period === 'week') return { from: daysAgoISO(6), to: todayISO() }
+    if (period === 'month') return { from: daysAgoISO(29), to: todayISO() }
+    return { from: customFrom, to: customTo }
+  }, [period, customFrom, customTo])
 
   const menuItemNames = useMemo(() => Object.fromEntries(menuItems.map((m) => [m.id, m.name])), [menuItems])
 
@@ -31,24 +53,37 @@ export function ItemUsageReport() {
     [inventoryItems, linksByInventoryItem]
   )
 
-  const { rows, loading } = useItemUsageData(period, itemsWithLinks, menuItemNames)
+  const { rows, loading } = useItemUsageData(range, itemsWithLinks, menuItemNames)
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <p className="text-sm text-ink/50">Compares what you bought against what got sold, for items you've linked to menu items.</p>
         <div className="flex gap-1 bg-surface border border-ink/10 rounded-xl p-1">
-          {(['week', 'month'] as UsagePeriod[]).map((p) => (
+          {(['week', 'month', 'custom'] as UsagePeriod[]).map((p) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
               className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${period === p ? 'bg-ink text-paper' : 'text-ink/50'}`}
             >
-              {p === 'week' ? 'This week' : 'This month'}
+              {p === 'week' ? 'This week' : p === 'month' ? 'This month' : 'Custom'}
             </button>
           ))}
         </div>
       </div>
+
+      {period === 'custom' && (
+        <div className="flex items-center gap-2 mb-4">
+          <div>
+            <label className="text-[10px] font-semibold text-ink/40 block">From</label>
+            <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="text-xs border border-ink/10 rounded-lg px-2 py-1 outline-none focus:border-ember" />
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold text-ink/40 block">To</label>
+            <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="text-xs border border-ink/10 rounded-lg px-2 py-1 outline-none focus:border-ember" />
+          </div>
+        </div>
+      )}
 
       {itemsWithLinks.length === 0 ? (
         <p className="text-sm text-ink/30 italic py-16 text-center border border-dashed border-ink/10 rounded-2xl">
@@ -65,7 +100,7 @@ export function ItemUsageReport() {
             <Card key={r.inventoryItemId} className="p-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="font-ticket font-bold text-sm">{r.inventoryItemName}</span>
-                <span className="text-xs text-ink/40">{period === 'week' ? 'Last 7 days' : 'Last 30 days'}</span>
+                <span className="text-xs text-ink/40">{range.from === range.to ? range.from : `${range.from} – ${range.to}`}</span>
               </div>
               <div className="grid grid-cols-2 gap-3 mb-2">
                 <div className="rounded-xl bg-ink/[0.03] p-3">

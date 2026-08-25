@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
-import { currentBranchId } from '../auth/authStore'
+import { currentBranchId, useAuthStore } from '../auth/authStore'
 import { useAccountsStore } from '../accounts/accountsStore'
 import type { Customer } from './types'
 
@@ -133,6 +133,17 @@ export const useCustomersStore = create<CustomersState>((set, get) => ({
     // A due being settled is real cash coming in — deposit it the same way
     // Billing does, so it shows up in Accounts too.
     if (methodKey) await useAccountsStore.getState().deposit(methodKey, amount, { reason: 'due settled' })
+    // Log it with a date, separately from the account deposit — this is
+    // what lets the customer's due statement show "paid Rs. 100 back on
+    // Aug 22nd" later, which nothing was recording before.
+    const { error: logErr } = await supabase.from('due_settlements').insert({
+      branch_id: currentBranchId(),
+      customer_id: id,
+      amount,
+      payment_method_key: methodKey ?? null,
+      created_by: useAuthStore.getState().staff?.id ?? null,
+    })
+    if (logErr) console.error('[customersStore] settleDue: logging settlement failed', logErr)
     set({ customers: await loadCustomers() })
   },
 
@@ -183,6 +194,7 @@ export interface Visit {
   amount: number
   itemsSummary: string
   activityNote?: string
+  duePortion: number // how much of this order was left unpaid at the time — the "which order, which date" trail for explaining a due later
 }
 
 // Fetched on demand when a customer's detail view opens — their real order
@@ -190,7 +202,7 @@ export interface Visit {
 export async function fetchCustomerVisits(customerId: string): Promise<{ visits: Visit[]; favoriteItem?: string }> {
   const { data, error } = await supabase
     .from('orders')
-    .select('id, closed_at, total, activity_note, order_items ( quantity, custom_name, is_complimentary, status, menu_items ( name ) )')
+    .select('id, closed_at, total, activity_note, order_items ( quantity, custom_name, is_complimentary, status, menu_items ( name ) ), payments ( amount )')
     .eq('customer_id', customerId)
     .eq('status', 'paid')
     .order('closed_at', { ascending: false })
@@ -208,12 +220,15 @@ export async function fetchCustomerVisits(customerId: string): Promise<{ visits:
       const name = i.custom_name ?? i.menu_items?.name ?? 'Item'
       itemCounts.set(name, (itemCounts.get(name) ?? 0) + i.quantity)
     }
+    const total = Number(o.total) || 0
+    const paid = (o.payments ?? []).reduce((sum: number, p: any) => sum + Number(p.amount), 0)
     return {
       id: o.id,
       date: o.closed_at,
-      amount: Number(o.total) || 0,
+      amount: total,
       itemsSummary: activeItems.map((i: any) => `${i.quantity}x ${i.custom_name ?? i.menu_items?.name ?? 'Item'}`).join(', '),
       activityNote: o.activity_note ?? undefined,
+      duePortion: Math.max(0, total - paid),
     }
   })
 
@@ -227,4 +242,38 @@ export async function fetchCustomerVisits(customerId: string): Promise<{ visits:
   }
 
   return { visits, favoriteItem }
+}
+
+export interface DueStatementEntry {
+  date: string
+  type: 'incurred' | 'settled'
+  amount: number // always positive — direction comes from `type`
+  description: string
+}
+
+// Combines both sides into one dated trail: every visit that left something
+// due (from fetchCustomerVisits above), and every time some of it got paid
+// back (due_settlements, added alongside settleDue). This is purely for
+// explaining "why do they owe this" — the actual current total lives on
+// customers.outstanding_due, not something recomputed from this list.
+export async function fetchDueStatement(customerId: string): Promise<DueStatementEntry[]> {
+  const [{ visits }, settlementsRes] = await Promise.all([
+    fetchCustomerVisits(customerId),
+    supabase.from('due_settlements').select('amount, payment_method_key, created_at').eq('customer_id', customerId).order('created_at', { ascending: true }),
+  ])
+
+  if (settlementsRes.error) console.error('[fetchDueStatement] settlements query failed', settlementsRes.error)
+
+  const incurred: DueStatementEntry[] = visits
+    .filter((v) => v.duePortion > 0)
+    .map((v) => ({ date: v.date, type: 'incurred' as const, amount: v.duePortion, description: v.itemsSummary }))
+
+  const settled: DueStatementEntry[] = (settlementsRes.data ?? []).map((s: any) => ({
+    date: s.created_at,
+    type: 'settled' as const,
+    amount: Number(s.amount),
+    description: s.payment_method_key ? `Paid via ${s.payment_method_key}` : 'Paid',
+  }))
+
+  return [...incurred, ...settled].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 }

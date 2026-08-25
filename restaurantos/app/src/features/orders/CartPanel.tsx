@@ -34,14 +34,24 @@ export function CartPanel({
   onVoid: (key: string, reason: string) => void
   onVoidExisting?: (itemId: string, reason: string) => void
   onComplimentary: (key: string) => void
-  onConfirm: () => void
+  onConfirm: () => void | Promise<void>
   isOpen: boolean
   onClose: () => void
 }) {
   const [noteEditKey, setNoteEditKey] = useState<string | null>(null)
   const [voidEditKey, setVoidEditKey] = useState<string | null>(null)
   const [voidExistingKey, setVoidExistingKey] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState(false)
   const billableCount = lines.filter((l) => l.status !== 'void').length
+
+  async function handleConfirm() {
+    setConfirming(true)
+    try {
+      await onConfirm()
+    } finally {
+      setConfirming(false)
+    }
+  }
 
   return (
     <>
@@ -209,10 +219,10 @@ export function CartPanel({
           <Button
             className="w-full text-white hover:brightness-95"
             style={{ background: 'var(--color-ember)' }}
-            disabled={billableCount === 0}
-            onClick={onConfirm}
+            disabled={billableCount === 0 || confirming}
+            onClick={handleConfirm}
           >
-            Confirm order
+            {confirming ? 'Sending…' : 'Confirm order'}
           </Button>
         </div>
       </div>

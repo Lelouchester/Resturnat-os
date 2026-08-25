@@ -129,6 +129,7 @@ export function BillingPage() {
   // bill into a visit that builds someone's loyalty history.
   const [customerSearch, setCustomerSearch] = useState('')
   const [customerId, setCustomerId] = useState<string | null>(null)
+  const [processingPayment, setProcessingPayment] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
 
   const subtotal = useMemo(
@@ -227,7 +228,9 @@ export function BillingPage() {
   const selectedCustomer = customers.find((c) => c.id === customerId)
 
   async function handleCompletePayment() {
-    if (!order) return
+    if (!order || processingPayment) return
+    setProcessingPayment(true)
+    try {
 
     // Snapshot the bill exactly as it's being paid, before anything about
     // the screen changes — this is what "Print" prints from once payment
@@ -289,6 +292,9 @@ export function BillingPage() {
     setDiscountMode('pct')
     setServiceChargePct(defaultServiceChargePct)
     setTaxPct(defaultTaxPct)
+    } finally {
+      setProcessingPayment(false)
+    }
   }
 
   if (ordersLoading) {
@@ -596,10 +602,10 @@ export function BillingPage() {
           </div>
           <Button
             className="mt-2"
-            disabled={remaining > 0 && !customerId}
+            disabled={(remaining > 0 && !customerId) || processingPayment}
             onClick={handleCompletePayment}
           >
-            {remaining > 0 ? `Mark Rs. ${remaining} as due & close` : 'Complete payment'}
+            {processingPayment ? 'Processing…' : remaining > 0 ? `Mark Rs. ${remaining} as due & close` : 'Complete payment'}
           </Button>
           {remaining > 0 && !customerId && (
             <p className="text-xs text-status-cleaning text-center mt-1.5">Attach a customer above to mark the rest as due.</p>

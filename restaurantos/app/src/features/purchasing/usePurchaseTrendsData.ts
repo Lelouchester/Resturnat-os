@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../shared/lib/supabase'
 
-export type TrendRange = '7 days' | '30 days' | '90 days'
+export type TrendRange = '7 days' | '30 days' | '90 days' | 'custom'
 
 export interface PurchaseTrendsData {
   spendTrend: { period: string; spend: number }[]
@@ -12,14 +12,6 @@ export interface PurchaseTrendsData {
 }
 
 const EMPTY: PurchaseTrendsData = { spendTrend: [], topItems: [], bySupplier: [], totalSpend: 0, purchaseCount: 0 }
-
-function rangeStart(range: TrendRange): Date {
-  const d = new Date()
-  d.setHours(0, 0, 0, 0)
-  const days = range === '7 days' ? 6 : range === '30 days' ? 29 : 89
-  d.setDate(d.getDate() - days)
-  return d
-}
 
 function bucketKey(date: Date, weekly: boolean): string {
   if (!weekly) return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
@@ -34,7 +26,7 @@ function bucketKey(date: Date, weekly: boolean): string {
  * suppliers get the most. Cancelled purchases are excluded throughout,
  * same as the running total on the purchase history list.
  */
-export function usePurchaseTrendsData(range: TrendRange) {
+export function usePurchaseTrendsData(range: { from: string; to: string }) {
   const [data, setData] = useState<PurchaseTrendsData>(EMPTY)
   const [loading, setLoading] = useState(true)
 
@@ -43,7 +35,8 @@ export function usePurchaseTrendsData(range: TrendRange) {
 
     async function load() {
       setLoading(true)
-      const from = rangeStart(range)
+      const from = `${range.from}T00:00:00`
+      const to = `${range.to}T23:59:59`
 
       const { data: lines, error } = await supabase
         .from('purchase_lines')
@@ -51,13 +44,18 @@ export function usePurchaseTrendsData(range: TrendRange) {
           'description, quantity, unit_cost, inventory_item_id, inventory_items ( name, unit ), purchases!inner ( created_at, status, supplier_id, suppliers ( name ) )'
         )
         .neq('purchases.status', 'cancelled')
-        .gte('purchases.created_at', from.toISOString())
+        .gte('purchases.created_at', from)
+        .lte('purchases.created_at', to)
 
       if (error) console.error('[usePurchaseTrendsData] query failed', error)
       if (cancelled) return
 
-      const weekly = range === '90 days'
-      const trendMap = new Map<string, number>()
+      // Bucket weekly once the span gets long enough that daily bars would
+      // be too cramped to read — same idea regardless of whether the range
+      // came from a preset button or a manually picked start/end date.
+      const spanDays = (new Date(range.to).getTime() - new Date(range.from).getTime()) / 86400000
+      const weekly = spanDays > 60
+      const trendMap = new Map<string, { spend: number; sortKey: number }>()
       const itemMap = new Map<string, { name: string; unit?: string; qty: number; spend: number }>()
       const supplierMap = new Map<string, number>()
       let totalSpend = 0
@@ -69,7 +67,9 @@ export function usePurchaseTrendsData(range: TrendRange) {
         totalSpend += lineTotal
 
         const bucket = bucketKey(new Date(purchase.created_at), weekly)
-        trendMap.set(bucket, (trendMap.get(bucket) ?? 0) + lineTotal)
+        const cur = trendMap.get(bucket) ?? { spend: 0, sortKey: new Date(purchase.created_at).getTime() }
+        cur.spend += lineTotal
+        trendMap.set(bucket, cur)
 
         const itemKey = row.inventory_item_id ? `inv:${row.inventory_item_id}` : `desc:${row.description.trim().toLowerCase()}`
         const existing = itemMap.get(itemKey)
@@ -91,7 +91,13 @@ export function usePurchaseTrendsData(range: TrendRange) {
       // Set of the purchase's created_at+supplier combo as a stable-enough key.
       const distinctPurchases = new Set((lines ?? []).map((l: any) => `${l.purchases.created_at}:${l.purchases.supplier_id}`))
 
-      const spendTrend = Array.from(trendMap.entries()).map(([period, spend]) => ({ period, spend }))
+      // Was previously left in whatever order lines happened to load in
+      // (JS Map preserves insertion order) — meaning the chart's x-axis
+      // could come out scrambled rather than chronological.
+      const spendTrend = Array.from(trendMap.entries())
+        .map(([period, v]) => ({ period, spend: v.spend, sortKey: v.sortKey }))
+        .sort((a, b) => a.sortKey - b.sortKey)
+        .map(({ period, spend }) => ({ period, spend }))
       const topItems = Array.from(itemMap.values())
         .sort((a, b) => b.spend - a.spend)
         .slice(0, 10)
@@ -107,7 +113,7 @@ export function usePurchaseTrendsData(range: TrendRange) {
     return () => {
       cancelled = true
     }
-  }, [range])
+  }, [range.from, range.to])
 
   return { data, loading }
 }

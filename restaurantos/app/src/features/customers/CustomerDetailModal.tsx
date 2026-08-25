@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { X, Star, Phone, Pencil, Trash2 } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
-import { useCustomersStore, fetchCustomerVisits, type Visit } from './customersStore'
+import { useCustomersStore, fetchCustomerVisits, fetchDueStatement, type Visit, type DueStatementEntry } from './customersStore'
 import { useOrdersStore } from '../orders/ordersStore'
 import { useSettingsStore } from '../settings/settingsStore'
 import { useRepeatOrderStore } from '../orders/repeatOrderStore'
@@ -27,6 +27,9 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
   const navigate = useNavigate()
   const [notes, setNotes] = useState(customer.notes ?? '')
   const [settling, setSettling] = useState(false)
+  const [dueStatementOpen, setDueStatementOpen] = useState(false)
+  const [dueStatement, setDueStatement] = useState<DueStatementEntry[]>([])
+  const [dueStatementLoading, setDueStatementLoading] = useState(false)
   const [amount, setAmount] = useState(String(customer.outstandingDue))
   const [settleMethod, setSettleMethod] = useState(paymentMethods[0]?.key ?? '')
   const [editingProfile, setEditingProfile] = useState(!customer.name && !customer.phone)
@@ -75,6 +78,17 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
     const result = await cancelPaidOrder(visitId)
     if (result.ok) setVisits(await fetchCustomerVisits(customer.id).then((r) => r.visits))
     else setCancelOrderError(result.error ?? 'Could not cancel this order.')
+  }
+
+  async function toggleDueStatement() {
+    if (dueStatementOpen) {
+      setDueStatementOpen(false)
+      return
+    }
+    setDueStatementOpen(true)
+    setDueStatementLoading(true)
+    setDueStatement(await fetchDueStatement(customer.id))
+    setDueStatementLoading(false)
   }
 
   return (
@@ -185,6 +199,44 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
                 </div>
               </div>
             )}
+            <button
+              onClick={toggleDueStatement}
+              className="mt-2 text-[11px] font-semibold text-ink/40 underline"
+            >
+              {dueStatementOpen ? 'Hide' : 'View'} due statement
+            </button>
+            {dueStatementOpen && (
+              <div className="mt-2 rounded-xl border border-ink/10 p-3 space-y-2">
+                {dueStatementLoading ? (
+                  <div className="text-xs text-ink/30">Loading…</div>
+                ) : dueStatement.length === 0 ? (
+                  <div className="text-xs text-ink/30 italic">Nothing on record yet.</div>
+                ) : (
+                  (() => {
+                    let running = 0
+                    return dueStatement.map((e, i) => {
+                      running += e.type === 'incurred' ? e.amount : -e.amount
+                      return (
+                        <div key={i} className="text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-ink/50">
+                              {new Date(e.date).toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
+                            </span>
+                            <span className={`font-ticket font-semibold ${e.type === 'incurred' ? 'text-status-cleaning' : 'text-status-available'}`}>
+                              {e.type === 'incurred' ? '+' : '-'}Rs. {e.amount}
+                            </span>
+                          </div>
+                          <div className="text-ink/35 flex items-center justify-between">
+                            <span>{e.type === 'incurred' ? e.description : e.description}</span>
+                            <span>Balance: Rs. {running}</span>
+                          </div>
+                        </div>
+                      )
+                    })
+                  })()
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -213,9 +265,14 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
                 return (
                   <div key={v.id} className="flex justify-between items-start text-sm border-b border-ink/5 pb-2 last:border-0">
                     <div className="min-w-0">
-                      <div className="text-xs text-ink/40">{new Date(v.date).toLocaleDateString()}</div>
+                      <div className="text-xs text-ink/40">
+                        {new Date(v.date).toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
+                      </div>
                       <div className="text-xs text-ink/50">{v.itemsSummary}</div>
                       {v.activityNote && <div className="text-[11px] text-ink/35 italic">{v.activityNote}</div>}
+                      {v.duePortion > 0 && (
+                        <div className="text-[11px] font-semibold text-status-cleaning">Rs. {v.duePortion} was left as due from this order</div>
+                      )}
                       <div className="flex items-center gap-3 mt-1">
                         <button
                           onClick={() => repeatOrder(v.itemsSummary)}
