@@ -1025,6 +1025,23 @@ end $$;
 
 select cron.schedule('post-daily-fonepay-entries', '45 18 * * *', $$select post_daily_fonepay_entries();$$);
 
+-- ----------------------------------------------------------------------------
+-- A dated record of every time a customer's due gets paid down — see
+-- migration 010 for full comments. Settling stays simple (one running
+-- total per customer, in aggregate); this is purely a dated log alongside
+-- it for the customer due statement.
+-- ----------------------------------------------------------------------------
+create table due_settlements (
+  id uuid primary key default uuid_generate_v4(),
+  branch_id uuid references branches(id) on delete cascade,
+  customer_id uuid references customers(id) on delete cascade,
+  amount numeric(10,2) not null,
+  payment_method_key text,
+  created_by uuid references staff(id),
+  created_at timestamptz default now()
+);
+
+
 
 
 
@@ -1241,6 +1258,10 @@ create policy "staff can access their branch stock_movements" on stock_movements
 
 alter table menu_inventory_links enable row level security;
 create policy "staff can access their branch menu_inventory_links" on menu_inventory_links for all
+  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
+
+alter table due_settlements enable row level security;
+create policy "staff can access their branch due settlements" on due_settlements for all
   using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
 
 alter table purchase_lines enable row level security;
