@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
 import { useAuthStore, currentBranchId } from '../auth/authStore'
-import { useShiftStore } from '../shifts/shiftStore'
 import { useTablesStore } from '../tables/tablesStore'
 import { useAccountsStore } from '../accounts/accountsStore'
 import { useMenuStore } from '../menu/menuStore'
@@ -177,7 +176,23 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     if (inFlight) return inFlight
 
     const creation = (async () => {
-      const shiftId = useShiftStore.getState().shift?.id
+      // Deliberately not read from the local shift store here — a device
+      // that's been sitting on this screen since before a new shift
+      // started (phone left open, tab never reloaded) would otherwise keep
+      // tagging new orders with the shift it remembers, even after a
+      // different one is actually open. That silently splits a day's sales
+      // between two shift records — Reports still shows the true total
+      // (it doesn't care about shifts at all), but Accounts' shift-scoped
+      // total quietly comes up short. A fresh lookup at the exact moment
+      // of creation can't go stale the way cached local state can.
+      const { data: openShifts } = await supabase
+        .from('shifts')
+        .select('id')
+        .eq('branch_id', currentBranchId())
+        .eq('status', 'open')
+        .order('opened_at', { ascending: false })
+        .limit(1)
+      const shiftId = openShifts?.[0]?.id ?? null
       // A customer may already have been assigned to this table before any
       // items were added (tapping the table and picking a name first) — carry
       // that over onto the order now, or it's otherwise never linked, since
