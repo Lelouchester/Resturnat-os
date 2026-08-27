@@ -630,7 +630,7 @@ function PaySupplierModal({
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+      <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-ticket text-lg font-bold flex items-center gap-2"><Receipt size={17} /> Pay {supplier.name}</h2>
           <button onClick={onClose} className="text-ink/40"><X size={20} /></button>

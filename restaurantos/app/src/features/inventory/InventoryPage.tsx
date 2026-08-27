@@ -265,7 +265,7 @@ export function InventoryPage() {
       {removing && (
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setRemoving(null)} />
-          <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+          <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto">
             <h2 className="font-ticket text-lg font-bold mb-2">Remove {removing.name}?</h2>
             <p className="text-xs text-ink/50 mb-4">
               If this item has purchase or stock history, it'll be hidden instead of deleted, so that history stays intact.

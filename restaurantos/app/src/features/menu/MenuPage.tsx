@@ -221,7 +221,7 @@ export function MenuPage() {
         return (
           <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setRemovingCategoryId(null)} />
-            <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+            <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto">
               <h2 className="font-ticket text-lg font-bold mb-4">{cat.name}</h2>
 
               <label className="flex items-center justify-between gap-3 rounded-xl border border-ink/10 px-3.5 py-3 mb-4 cursor-pointer">

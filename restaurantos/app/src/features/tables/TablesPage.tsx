@@ -208,7 +208,7 @@ export function TablesPage() {
         return (
           <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setRemovingId(null)} />
-            <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+            <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto">
               <h2 className="font-ticket text-lg font-bold mb-2">Remove {t.label}?</h2>
               <p className="text-sm text-ink/50 mb-4">
                 It'll disappear from the floor plan. Past orders for this table stay in your records — nothing gets deleted.
@@ -228,7 +228,7 @@ export function TablesPage() {
         return (
           <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setAssigningCustomerId(null)} />
-            <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+            <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="font-ticket text-lg font-bold">Customer for {t.label}</h2>
                 <button onClick={() => setAssigningCustomerId(null)} className="text-ink/40"><X size={20} /></button>
@@ -286,7 +286,7 @@ function TransferModal({
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+      <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-ticket text-lg font-bold flex items-center gap-2"><ArrowRightLeft size={17} /> Transfer {from.label}</h2>
           <button onClick={onClose} className="text-ink/40"><X size={20} /></button>
@@ -333,7 +333,7 @@ function MergeModal({
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+      <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-ticket text-lg font-bold flex items-center gap-2"><Merge size={17} /> Merge {from.label}</h2>
           <button onClick={onClose} className="text-ink/40"><X size={20} /></button>
@@ -378,7 +378,7 @@ function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label:
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+      <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-ticket text-lg font-bold">Add table</h2>
           <button onClick={onClose} className="text-ink/40"><X size={20} /></button>
@@ -422,7 +422,7 @@ function EditTableDetailsModal({
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+      <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-ticket text-lg font-bold">{table.label}</h2>
           <button onClick={onClose} className="text-ink/40"><X size={20} /></button>

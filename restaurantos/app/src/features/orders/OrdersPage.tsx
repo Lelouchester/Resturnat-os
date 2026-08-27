@@ -340,7 +340,7 @@ export function OrdersPage() {
       {cancelling && (
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setCancelling(false)} />
-          <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+          <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto">
             <h2 className="font-ticket text-lg font-bold mb-2">Cancel this order?</h2>
             <p className="text-xs text-ink/50 mb-4">
               Every item for {activeTableRow?.label} gets voided, any tracked inventory used gets put back, and the table frees up completely. This can't be undone.

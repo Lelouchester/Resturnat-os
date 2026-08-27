@@ -89,7 +89,7 @@ export function StaffPage() {
       {adding && (
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setAdding(false)} />
-          <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+          <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-ticket text-lg font-bold">Add staff</h2>
               <button onClick={() => setAdding(false)} className="text-ink/40"><X size={20} /></button>
@@ -216,7 +216,7 @@ export function StaffPage() {
         return (
           <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
             <div className="absolute inset-0 bg-black/40" onClick={() => setRemovingId(null)} />
-            <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5">
+            <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto">
               <h2 className="font-ticket text-lg font-bold mb-2">Remove {s.name}?</h2>
               <p className="text-sm text-ink/50 mb-4">
                 If they've never taken an order or opened a shift, they're deleted outright. If they have real history, they'll be deactivated instead so nothing breaks.
