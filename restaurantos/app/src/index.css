@@ -1,6 +1,20 @@
 @import "tailwindcss";
 
 /*
+  iOS Safari specifically can require a "wasted" first tap on a button
+  styled with hover effects — the tap only registers as a hover, and the
+  actual click only fires on a second tap. Every interactive element in
+  this app is a real <button> (correct), but with this many hover: classes
+  throughout, this is worth closing off globally rather than trusting
+  button semantics alone to avoid it on every iOS version. touch-action
+  also removes the ~300ms tap delay some mobile browsers still apply.
+*/
+button, a, [role="button"], input[type="submit"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/*
   RestaurantOS design tokens.
   Signature idea: the visual language of a kitchen order ticket — mono
   numerals for anything counted or timed (table No., prices, elapsed time),

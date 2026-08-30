@@ -20,6 +20,7 @@ interface CustomersState {
   updateNotes: (id: string, notes: string) => Promise<void>
   updateProfile: (id: string, patch: { name?: string; phone?: string }) => Promise<void>
   settleDue: (id: string, amount: number, methodKey?: string) => Promise<void>
+  adjustDue: (id: string, amount: number, remark: string) => Promise<{ ok: boolean; error?: string }>
   applyPayment: (id: string, billTotal: number, dueDelta: number) => Promise<void>
   removeCustomer: (id: string) => Promise<{ ok: boolean; error?: string }>
 }
@@ -147,6 +148,25 @@ export const useCustomersStore = create<CustomersState>((set, get) => ({
     set({ customers: await loadCustomers() })
   },
 
+  // Reduces a due with no matching payment and no account effect at all —
+  // for clearing out dummy dues a software bug created, not real
+  // transactions. Enforced at the database level, not just hidden in the
+  // UI — a non-management account gets a hard error from the function
+  // itself if this somehow gets called.
+  adjustDue: async (id, amount, remark) => {
+    const { error } = await supabase.rpc('adjust_customer_due', {
+      p_customer_id: id,
+      p_amount: amount,
+      p_remark: remark,
+    })
+    if (error) {
+      console.error('[customersStore] adjustDue failed', error)
+      return { ok: false, error: error.message }
+    }
+    set({ customers: await loadCustomers() })
+    return { ok: true }
+  },
+
   applyPayment: async (id, billTotal, dueDelta) => {
     const cust = get().customers.find((c) => c.id === id)
     if (!cust) return
@@ -202,7 +222,7 @@ export interface Visit {
 export async function fetchCustomerVisits(customerId: string): Promise<{ visits: Visit[]; favoriteItem?: string }> {
   const { data, error } = await supabase
     .from('orders')
-    .select('id, closed_at, total, activity_note, order_items ( quantity, custom_name, is_complimentary, status, menu_items ( name ) ), payments ( amount )')
+    .select('id, closed_at, total, due_amount, activity_note, order_items ( quantity, custom_name, is_complimentary, status, menu_items ( name ) )')
     .eq('customer_id', customerId)
     .eq('status', 'paid')
     .order('closed_at', { ascending: false })
@@ -220,15 +240,16 @@ export async function fetchCustomerVisits(customerId: string): Promise<{ visits:
       const name = i.custom_name ?? i.menu_items?.name ?? 'Item'
       itemCounts.set(name, (itemCounts.get(name) ?? 0) + i.quantity)
     }
-    const total = Number(o.total) || 0
-    const paid = (o.payments ?? []).reduce((sum: number, p: any) => sum + Number(p.amount), 0)
     return {
       id: o.id,
       date: o.closed_at,
-      amount: total,
+      amount: Number(o.total) || 0,
       itemsSummary: activeItems.map((i: any) => `${i.quantity}x ${i.custom_name ?? i.menu_items?.name ?? 'Item'}`).join(', '),
       activityNote: o.activity_note ?? undefined,
-      duePortion: Math.max(0, total - paid),
+      // Read directly from what Billing stamped at the moment of payment —
+      // not reconstructed from the payments table, which can be silently
+      // incomplete if one of its rows failed to write (see migration 011).
+      duePortion: Number(o.due_amount) || 0,
     }
   })
 
@@ -246,7 +267,7 @@ export async function fetchCustomerVisits(customerId: string): Promise<{ visits:
 
 export interface DueStatementEntry {
   date: string
-  type: 'incurred' | 'settled'
+  type: 'incurred' | 'settled' | 'adjusted'
   amount: number // always positive — direction comes from `type`
   description: string
 }
@@ -259,7 +280,7 @@ export interface DueStatementEntry {
 export async function fetchDueStatement(customerId: string): Promise<DueStatementEntry[]> {
   const [{ visits }, settlementsRes] = await Promise.all([
     fetchCustomerVisits(customerId),
-    supabase.from('due_settlements').select('amount, payment_method_key, created_at').eq('customer_id', customerId).order('created_at', { ascending: true }),
+    supabase.from('due_settlements').select('amount, payment_method_key, kind, remark, created_at').eq('customer_id', customerId).order('created_at', { ascending: true }),
   ])
 
   if (settlementsRes.error) console.error('[fetchDueStatement] settlements query failed', settlementsRes.error)
@@ -270,9 +291,9 @@ export async function fetchDueStatement(customerId: string): Promise<DueStatemen
 
   const settled: DueStatementEntry[] = (settlementsRes.data ?? []).map((s: any) => ({
     date: s.created_at,
-    type: 'settled' as const,
+    type: s.kind === 'adjustment' ? ('adjusted' as const) : ('settled' as const),
     amount: Number(s.amount),
-    description: s.payment_method_key ? `Paid via ${s.payment_method_key}` : 'Paid',
+    description: s.kind === 'adjustment' ? `Adjusted — ${s.remark}` : s.payment_method_key ? `Paid via ${s.payment_method_key}` : 'Paid',
   }))
 
   return [...incurred, ...settled].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())

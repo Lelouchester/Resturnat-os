@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { X, Star, Phone, Pencil, Trash2 } from 'lucide-react'
+import { X, Star, Phone, Pencil, Trash2, ShieldAlert } from 'lucide-react'
 import { Button } from '../../shared/ui/Button'
 import { useCustomersStore, fetchCustomerVisits, fetchDueStatement, type Visit, type DueStatementEntry } from './customersStore'
 import { useOrdersStore } from '../orders/ordersStore'
 import { useSettingsStore } from '../settings/settingsStore'
 import { useRepeatOrderStore } from '../orders/repeatOrderStore'
+import { useAuthStore } from '../auth/authStore'
 import { loyaltyTier } from './types'
 import type { Customer } from './types'
 
@@ -20,6 +21,8 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
   const updateNotes = useCustomersStore((s) => s.updateNotes)
   const updateProfile = useCustomersStore((s) => s.updateProfile)
   const settleDue = useCustomersStore((s) => s.settleDue)
+  const adjustDue = useCustomersStore((s) => s.adjustDue)
+  const canSeeFinancials = useAuthStore((s) => s.staff?.permissions.financials ?? false)
   const removeCustomer = useCustomersStore((s) => s.removeCustomer)
   const cancelPaidOrder = useOrdersStore((s) => s.cancelPaidOrder)
   const paymentMethods = useSettingsStore((s) => s.paymentMethods)
@@ -27,6 +30,10 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
   const navigate = useNavigate()
   const [notes, setNotes] = useState(customer.notes ?? '')
   const [settling, setSettling] = useState(false)
+  const [adjusting, setAdjusting] = useState(false)
+  const [adjustAmount, setAdjustAmount] = useState('')
+  const [adjustRemark, setAdjustRemark] = useState('')
+  const [adjustError, setAdjustError] = useState<string | null>(null)
   const [dueStatementOpen, setDueStatementOpen] = useState(false)
   const [dueStatement, setDueStatement] = useState<DueStatementEntry[]>([])
   const [dueStatementLoading, setDueStatementLoading] = useState(false)
@@ -89,6 +96,28 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
     setDueStatementLoading(true)
     setDueStatement(await fetchDueStatement(customer.id))
     setDueStatementLoading(false)
+  }
+
+  async function handleAdjustDue() {
+    const amt = Number(adjustAmount)
+    if (!amt || amt <= 0) {
+      setAdjustError('Enter an amount greater than zero.')
+      return
+    }
+    if (!adjustRemark.trim()) {
+      setAdjustError('A remark is required — this reduces the due with no matching payment, so it needs to say why.')
+      return
+    }
+    const result = await adjustDue(customer.id, amt, adjustRemark.trim())
+    if (!result.ok) {
+      setAdjustError(result.error ?? 'Could not adjust this due.')
+      return
+    }
+    setAdjusting(false)
+    setAdjustAmount('')
+    setAdjustRemark('')
+    setAdjustError(null)
+    if (dueStatementOpen) setDueStatement(await fetchDueStatement(customer.id))
   }
 
   return (
@@ -199,12 +228,53 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
                 </div>
               </div>
             )}
-            <button
-              onClick={toggleDueStatement}
-              className="mt-2 text-[11px] font-semibold text-ink/40 underline"
-            >
-              {dueStatementOpen ? 'Hide' : 'View'} due statement
-            </button>
+            <div className="flex items-center gap-3 mt-2">
+              <button onClick={toggleDueStatement} className="text-[11px] font-semibold text-ink/40 underline">
+                {dueStatementOpen ? 'Hide' : 'View'} due statement
+              </button>
+              {canSeeFinancials && (
+                <button
+                  onClick={() => {
+                    setAdjusting(true)
+                    setAdjustError(null)
+                  }}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-ink/40 underline"
+                >
+                  <ShieldAlert size={11} /> Adjust due
+                </button>
+              )}
+            </div>
+            {adjusting && (
+              <div className="mt-2 rounded-xl border border-ink/10 p-3">
+                <p className="text-[11px] text-ink/40 mb-2">
+                  Reduces the due directly — no payment recorded, no account touched. For clearing a dummy due caused by a software bug, not a real payment.
+                </p>
+                <label className="text-xs font-semibold text-ink/50 mb-1 block">Amount to remove (Rs.)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={adjustAmount}
+                  onChange={(e) => setAdjustAmount(e.target.value)}
+                  className="w-full mb-2 text-sm font-ticket font-bold border border-ink/10 rounded-lg px-2.5 py-2 outline-none focus:border-ember"
+                />
+                <label className="text-xs font-semibold text-ink/50 mb-1 block">Remark (required)</label>
+                <input
+                  value={adjustRemark}
+                  onChange={(e) => setAdjustRemark(e.target.value)}
+                  placeholder="Why is this being removed?"
+                  className="w-full mb-2 text-sm border border-ink/10 rounded-lg px-2.5 py-2 outline-none focus:border-ember"
+                />
+                {adjustError && <div className="mb-2 text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2">{adjustError}</div>}
+                <div className="flex gap-2">
+                  <Button variant="secondary" className="flex-1 py-2 text-xs" onClick={() => setAdjusting(false)}>
+                    Cancel
+                  </Button>
+                  <Button className="flex-1 py-2 text-xs" onClick={handleAdjustDue}>
+                    Confirm
+                  </Button>
+                </div>
+              </div>
+            )}
             {dueStatementOpen && (
               <div className="mt-2 rounded-xl border border-ink/10 p-3 space-y-2">
                 {dueStatementLoading ? (

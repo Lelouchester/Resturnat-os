@@ -549,6 +549,14 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
         tip_amount: params.tipAmount,
         total: params.total,
         split_guest_count: params.splitGuestCount,
+        // Stamped directly here, once, rather than reconstructed later by
+        // re-summing the payments rows above — if one of those inserts
+        // ever silently fails (a dropped request on a flaky connection),
+        // a report re-deriving "was this left due" from the now-incomplete
+        // payments table would wrongly conclude the whole bill is still
+        // unpaid, even though the real due tracker (customers.outstanding_due,
+        // set from this same totalPaid figure) is already correct.
+        due_amount: Math.max(0, params.total - totalPaid),
       })
       .eq('id', orderId)
     if (closeErr) console.error('[ordersStore] completePayment: closing order failed', closeErr)
