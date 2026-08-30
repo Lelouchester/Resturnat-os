@@ -305,7 +305,8 @@ create table orders (
   split_guest_count integer default 1, -- >1 means the bill was split evenly this many ways
   opened_at timestamptz default now(),
   closed_at timestamptz,
-  activity_note text -- e.g. "Transferred from Table 1", "Merged with Table 3's order" — set at transfer/merge time
+  activity_note text, -- e.g. "Transferred from Table 1", "Merged with Table 3's order" — set at transfer/merge time
+  due_amount numeric(10,2) default 0 -- stamped once at payment completion — see migration 011 for why this isn't reconstructed from payments later
 );
 
 create table order_items (
@@ -733,7 +734,6 @@ declare
   v_payment record;
   v_paid_total numeric;
   v_change_given numeric;
-  v_due_contribution numeric;
   v_others_merged_in boolean;
 begin
   select id into v_staff_id from staff where auth_user_id = auth.uid() and is_active limit 1;
@@ -778,7 +778,9 @@ begin
   end loop;
 
   -- Undo the money: each payment collected for this order gets withdrawn
-  -- back out of the account it was deposited into.
+  -- back out of the account it was deposited into. This still needs the
+  -- real payments rows — reversing money requires knowing which specific
+  -- accounts received it, which due_amount alone doesn't capture.
   select coalesce(sum(amount), 0) into v_paid_total from payments where order_id = p_order_id;
 
   for v_payment in
@@ -809,17 +811,17 @@ begin
     end;
   end if;
 
-  -- Undo the customer's due/lifetime-spend/loyalty effect from this order,
-  -- floored at zero so it can't push their numbers negative if they've
-  -- settled part of their due since this order happened.
+  -- Undo the customer's due/lifetime-spend/loyalty effect from this order.
+  -- Reads due_amount directly (stamped once, reliably, at payment time)
+  -- rather than recomputing total - sum(payments), which migration 011
+  -- found could be wrong if a payments row was ever missing.
   if v_order.customer_id is not null then
-    v_due_contribution := greatest(0, v_order.total - v_paid_total);
     update customers
     set
       lifetime_spend = greatest(0, lifetime_spend - v_order.total),
       loyalty_points = greatest(0, loyalty_points - round(v_order.total / 100)),
-      outstanding_due = greatest(0, outstanding_due - v_due_contribution),
-      due_since = case when greatest(0, outstanding_due - v_due_contribution) = 0 then null else due_since end
+      outstanding_due = greatest(0, outstanding_due - coalesce(v_order.due_amount, 0)),
+      due_since = case when greatest(0, outstanding_due - coalesce(v_order.due_amount, 0)) = 0 then null else due_since end
     where id = v_order.customer_id;
   end if;
 
@@ -831,6 +833,7 @@ end;
 $$;
 
 grant execute on function cancel_order(uuid, timestamptz) to authenticated;
+
 
 -- ----------------------------------------------------------------------------
 -- Manual bank reconciliation ledger — see migration 006 for full comments.
@@ -1029,9 +1032,59 @@ create table due_settlements (
   customer_id uuid references customers(id) on delete cascade,
   amount numeric(10,2) not null,
   payment_method_key text,
+  kind text not null default 'payment', -- 'payment' (real money, any staff) or 'adjustment' (no money, management only — see adjust_customer_due below)
+  remark text,
   created_by uuid references staff(id),
   created_at timestamptz default now()
 );
+
+-- Reduces a customer's due with no matching payment and no account effect
+-- at all — for clearing dummy dues a software bug created. Gated to
+-- financials-permitted staff, enforced inside the function itself. See
+-- migration 013 for the RLS policy that blocks a direct client insert of
+-- an 'adjustment' row, closing off the obvious way this could be bypassed.
+create or replace function adjust_customer_due(p_customer_id uuid, p_amount numeric, p_remark text)
+returns void
+language plpgsql security definer as $$
+declare
+  v_staff_id uuid;
+  v_branch_id uuid;
+  v_customer customers%rowtype;
+  v_next_due numeric;
+begin
+  select id into v_staff_id from staff where auth_user_id = auth.uid() and is_active limit 1;
+  if v_staff_id is null then
+    raise exception 'no active staff record for caller';
+  end if;
+  if not current_staff_financials_ok() then
+    raise exception 'not permitted to adjust customer dues';
+  end if;
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'enter an amount greater than zero';
+  end if;
+  if p_remark is null or length(trim(p_remark)) = 0 then
+    raise exception 'a remark is required — this reduces a due with no matching payment, so it needs to say why';
+  end if;
+
+  v_branch_id := current_staff_branch();
+
+  select * into v_customer from customers where id = p_customer_id and branch_id = v_branch_id;
+  if v_customer.id is null then
+    raise exception 'customer not found';
+  end if;
+
+  v_next_due := greatest(0, v_customer.outstanding_due - p_amount);
+
+  update customers
+  set outstanding_due = v_next_due, due_since = case when v_next_due = 0 then null else due_since end
+  where id = p_customer_id;
+
+  insert into due_settlements (branch_id, customer_id, amount, payment_method_key, kind, remark, created_by)
+  values (v_branch_id, p_customer_id, p_amount, null, 'adjustment', trim(p_remark), v_staff_id);
+end;
+$$;
+
+grant execute on function adjust_customer_due(uuid, numeric, text) to authenticated;
 
 
 
