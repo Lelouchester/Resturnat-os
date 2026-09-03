@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import { Card } from '../../shared/ui/Card'
 import { usePurchaseTrendsData, type TrendRange } from './usePurchaseTrendsData'
@@ -18,6 +18,7 @@ export function PurchaseTrendsView() {
   const [preset, setPreset] = useState<TrendRange>('30 days')
   const [customFrom, setCustomFrom] = useState(() => daysAgoISO(29))
   const [customTo, setCustomTo] = useState(todayISO())
+  const [selectedBucket, setSelectedBucket] = useState<string | null>(null)
 
   const range = useMemo(() => {
     if (preset === '7 days') return { from: daysAgoISO(6), to: todayISO() }
@@ -27,6 +28,10 @@ export function PurchaseTrendsView() {
   }, [preset, customFrom, customTo])
 
   const { data, loading } = usePurchaseTrendsData(range)
+
+  useEffect(() => {
+    setSelectedBucket(null)
+  }, [range.from, range.to])
 
   return (
     <div>
@@ -71,8 +76,13 @@ export function PurchaseTrendsView() {
               <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40">Spend trend</div>
               <div className="font-ticket font-bold">Rs. {data.totalSpend.toLocaleString()}</div>
             </div>
+            <p className="text-[11px] text-ink/30 mb-1">Tap a point to see what made up that day's total.</p>
             <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={data.spendTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <LineChart
+                data={data.spendTrend}
+                margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                onClick={(e: any) => setSelectedBucket(e?.activeLabel ?? null)}
+              >
                 <CartesianGrid stroke="rgba(0,0,0,0.05)" vertical={false} />
                 <XAxis dataKey="period" tick={{ fontSize: 11, fill: 'rgba(20,22,26,0.4)' }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: 'rgba(20,22,26,0.4)' }} axisLine={false} tickLine={false} />
@@ -80,9 +90,34 @@ export function PurchaseTrendsView() {
                   contentStyle={{ borderRadius: 12, border: '1px solid rgba(0,0,0,0.08)', fontSize: 12 }}
                   formatter={(v: any) => [`Rs. ${v}`, 'Spend']}
                 />
-                <Line type="monotone" dataKey="spend" stroke="#e8862e" strokeWidth={2.5} dot={{ r: 3, fill: '#e8862e' }} />
+                <Line type="monotone" dataKey="spend" stroke="#e8862e" strokeWidth={2.5} dot={{ r: 3, fill: '#e8862e', cursor: 'pointer' }} activeDot={{ r: 5, cursor: 'pointer' }} />
               </LineChart>
             </ResponsiveContainer>
+            {selectedBucket && (
+              <div className="mt-3 pt-3 border-t border-ink/5">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold">{selectedBucket}</span>
+                  <button onClick={() => setSelectedBucket(null)} className="text-[11px] text-ink/40 underline">
+                    Close
+                  </button>
+                </div>
+                {(data.detailsByBucket[selectedBucket] ?? []).length === 0 ? (
+                  <p className="text-xs text-ink/30 italic">No purchases found for this point.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {data.detailsByBucket[selectedBucket].map((d, i) => (
+                      <div key={i} className="flex items-center justify-between text-xs">
+                        <span className="text-ink/60 truncate">
+                          {d.qty}
+                          {d.unit ? ` ${d.unit}` : 'x'} {d.name} <span className="text-ink/30">· {d.supplier}</span>
+                        </span>
+                        <span className="font-ticket font-semibold shrink-0 ml-2">Rs. {Math.round(d.spend).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </Card>
 
           <div className="grid md:grid-cols-2 gap-4">

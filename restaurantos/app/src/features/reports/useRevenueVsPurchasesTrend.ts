@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../shared/lib/supabase'
+import { fetchAllRows } from '../../shared/lib/fetchAllRows'
 
 export type GlanceRange = '7 days' | '30 days' | '90 days' | 'custom'
 
@@ -37,18 +38,21 @@ export function useRevenueVsPurchasesTrend(range: { from: string; to: string }) 
       const spanDays = (new Date(range.to).getTime() - new Date(range.from).getTime()) / 86400000
       const weekly = spanDays > 60
 
-      const [{ data: orders, error: ordersErr }, { data: lines, error: linesErr }] = await Promise.all([
-        supabase.from('orders').select('total, closed_at').eq('status', 'paid').gte('closed_at', from).lte('closed_at', to),
-        supabase
-          .from('purchase_lines')
-          .select('quantity, unit_cost, purchases!inner ( created_at, status )')
-          .neq('purchases.status', 'cancelled')
-          .gte('purchases.created_at', from)
-          .lte('purchases.created_at', to),
+      const [orders, lines] = await Promise.all([
+        fetchAllRows<{ total: number; closed_at: string }>((f, t) =>
+          supabase.from('orders').select('total, closed_at').eq('status', 'paid').gte('closed_at', from).lte('closed_at', to).range(f, t)
+        ),
+        fetchAllRows<{ quantity: number; unit_cost: number; purchases: { created_at: string; status: string } }>((f, t) =>
+          supabase
+            .from('purchase_lines')
+            .select('quantity, unit_cost, purchases!inner ( created_at, status )')
+            .neq('purchases.status', 'cancelled')
+            .gte('purchases.created_at', from)
+            .lte('purchases.created_at', to)
+            .range(f, t) as any
+        ),
       ])
 
-      if (ordersErr) console.error('[useRevenueVsPurchasesTrend] orders query failed', ordersErr)
-      if (linesErr) console.error('[useRevenueVsPurchasesTrend] purchase_lines query failed', linesErr)
       if (cancelled) return
 
       const byBucket = new Map<string, { revenue: number; purchases: number; sortKey: number }>()

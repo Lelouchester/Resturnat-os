@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../shared/lib/supabase'
+import { fetchAllRows } from '../../shared/lib/fetchAllRows'
 
 export type UsagePeriod = 'week' | 'month' | 'custom'
 
@@ -44,29 +45,32 @@ export function useItemUsageData(
       const inventoryIds = itemsWithLinks.map((i) => i.id)
       const allMenuIds = Array.from(new Set(itemsWithLinks.flatMap((i) => i.linkedMenuItemIds)))
 
-      const [{ data: purchaseLines, error: plErr }, { data: orderItems, error: oiErr }] = await Promise.all([
-        supabase
-          .from('purchase_lines')
-          .select('inventory_item_id, quantity, unit_cost, purchases!inner ( created_at, status )')
-          .in('inventory_item_id', inventoryIds)
-          .eq('kind', 'inventory')
-          .neq('purchases.status', 'cancelled')
-          .gte('purchases.created_at', from)
-          .lte('purchases.created_at', to),
+      const [purchaseLines, orderItems] = await Promise.all([
+        fetchAllRows<any>((f, t) =>
+          supabase
+            .from('purchase_lines')
+            .select('inventory_item_id, quantity, unit_cost, purchases!inner ( created_at, status )')
+            .in('inventory_item_id', inventoryIds)
+            .eq('kind', 'inventory')
+            .neq('purchases.status', 'cancelled')
+            .gte('purchases.created_at', from)
+            .lte('purchases.created_at', to)
+            .range(f, t) as any
+        ),
         allMenuIds.length > 0
-          ? supabase
-              .from('order_items')
-              .select('menu_item_id, quantity, unit_price, status, orders!inner ( closed_at, status )')
-              .in('menu_item_id', allMenuIds)
-              .neq('status', 'void')
-              .eq('orders.status', 'paid')
-              .gte('orders.closed_at', from)
-              .lte('orders.closed_at', to)
-          : Promise.resolve({ data: [], error: null }),
+          ? fetchAllRows<any>((f, t) =>
+              supabase
+                .from('order_items')
+                .select('menu_item_id, quantity, unit_price, status, orders!inner ( closed_at, status )')
+                .in('menu_item_id', allMenuIds)
+                .neq('status', 'void')
+                .eq('orders.status', 'paid')
+                .gte('orders.closed_at', from)
+                .lte('orders.closed_at', to)
+                .range(f, t) as any
+            )
+          : Promise.resolve([]),
       ])
-
-      if (plErr) console.error('[useItemUsageData] purchase_lines query failed', plErr)
-      if (oiErr) console.error('[useItemUsageData] order_items query failed', oiErr)
 
       const purchasedQtyByItem = new Map<string, number>()
       const purchasedSpendByItem = new Map<string, number>()
