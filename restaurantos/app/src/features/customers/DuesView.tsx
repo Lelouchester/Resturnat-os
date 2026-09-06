@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { AlertTriangle, Phone } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import type { Customer } from './types'
@@ -6,16 +7,29 @@ function daysOverdue(dueSince: string) {
   return Math.floor((Date.now() - new Date(dueSince).getTime()) / (24 * 60 * 60 * 1000))
 }
 
+type SortMode = 'overdue' | 'highest' | 'lowest'
+const SORT_LABELS: Record<SortMode, string> = {
+  overdue: 'Longest overdue',
+  highest: 'Highest due',
+  lowest: 'Lowest due',
+}
+
 /**
  * Everyone with an outstanding due, in one place — the thing missing before
  * was a total and a way to see who to chase first, rather than opening
- * every customer one at a time. Sorted longest-overdue first, since that's
- * usually who to follow up with.
+ * every customer one at a time. Defaults to longest-overdue first, since
+ * that's usually who to follow up with, but sortable by amount either way
+ * too — chasing the single biggest due first is a different, equally valid
+ * strategy from working oldest-first.
  */
 export function DuesView({ customers, onSelect }: { customers: Customer[]; onSelect: (id: string) => void }) {
+  const [sortMode, setSortMode] = useState<SortMode>('overdue')
+
   const withDue = customers
     .filter((c) => c.outstandingDue > 0)
     .sort((a, b) => {
+      if (sortMode === 'highest') return b.outstandingDue - a.outstandingDue
+      if (sortMode === 'lowest') return a.outstandingDue - b.outstandingDue
       const daysA = a.dueSince ? daysOverdue(a.dueSince) : 0
       const daysB = b.dueSince ? daysOverdue(b.dueSince) : 0
       return daysB - daysA
@@ -55,6 +69,23 @@ export function DuesView({ customers, onSelect }: { customers: Customer[]; onSel
           </div>
         </div>
       </Card>
+
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs text-ink/40">{withDue.length} customer{withDue.length === 1 ? '' : 's'} with a due</div>
+        <div className="flex gap-1 bg-surface border border-ink/10 rounded-xl p-1">
+          {(Object.keys(SORT_LABELS) as SortMode[]).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setSortMode(mode)}
+              className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                sortMode === mode ? 'bg-ink text-paper' : 'text-ink/50'
+              }`}
+            >
+              {SORT_LABELS[mode]}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="space-y-2">
         {withDue.map((c) => {

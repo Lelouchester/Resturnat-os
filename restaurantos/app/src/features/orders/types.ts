@@ -50,6 +50,12 @@ export interface LiveOrder {
   tipAmount: number
   total: number
   splitGuestCount: number
+  // Sum of any payments already collected against this order while it's
+  // still open/billing — e.g. someone from a group paid their share early
+  // and left, but the table itself isn't closed out yet. Distinct from
+  // due_amount, which only ever gets stamped once the order actually closes.
+  advancePaid: number
+  isStaffOrder: boolean
   openedAt: string
   closedAt?: string
   activityNote?: string // e.g. "Transferred from Table 1", "Merged with Table 3's order" — set at transfer/merge time

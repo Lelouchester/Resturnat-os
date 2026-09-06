@@ -14,13 +14,16 @@ import { useInventoryStore } from '../inventory/inventoryStore'
 import { useCustomersStore } from '../customers/customersStore'
 import { useAuthStore } from '../auth/authStore'
 
-const ALL_RANGES: ReportRange[] = ['Today', '7 days', '30 days']
+const ALL_RANGES: ReportRange[] = ['Today', '7 days', '30 days', 'Custom']
 
 export function ReportsPage() {
   const canSeeFullHistory = useAuthStore((s) => s.staff?.permissions.financials ?? false)
   const RANGES = canSeeFullHistory ? ALL_RANGES : (['Today', '7 days'] as ReportRange[])
   const [range, setRange] = useState<ReportRange>('7 days')
-  const { data, loading } = useReportsData(canSeeFullHistory ? range : (range === '30 days' ? '7 days' : range))
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+  const effectiveRange = canSeeFullHistory ? range : (range === '30 days' || range === 'Custom' ? '7 days' : range)
+  const { data, loading } = useReportsData(effectiveRange, customFrom, customTo)
 
   // Today's Snapshot answers "how did today go" in ten seconds — for a
   // manager or shareholder checking in. Detailed Reports is the existing
@@ -104,7 +107,27 @@ export function ReportsPage() {
         <RevenueVsPurchasesCard />
       ) : (
         <>
-      <div className="flex items-center justify-end mb-4">
+      <div className="flex items-center justify-end mb-4 gap-2 flex-wrap">
+        {range === 'Custom' && (
+          <div className="flex items-center gap-1.5">
+            <input
+              type="date"
+              value={customFrom}
+              max={customTo || undefined}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              className="text-xs border border-ink/10 rounded-lg px-2 py-1.5 outline-none focus:border-ember font-ticket"
+            />
+            <span className="text-ink/30 text-xs">to</span>
+            <input
+              type="date"
+              value={customTo}
+              min={customFrom || undefined}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => setCustomTo(e.target.value)}
+              className="text-xs border border-ink/10 rounded-lg px-2 py-1.5 outline-none focus:border-ember font-ticket"
+            />
+          </div>
+        )}
         <div className="flex gap-1 bg-surface border border-ink/10 rounded-xl p-1">
           {RANGES.map((r) => (
             <button
@@ -120,7 +143,11 @@ export function ReportsPage() {
         </div>
       </div>
 
-      {loading ? (
+      {range === 'Custom' && (!customFrom || !customTo) ? (
+        <p className="text-sm text-ink/30 italic py-16 text-center border border-dashed border-ink/10 rounded-2xl">
+          Pick a start and end date above.
+        </p>
+      ) : loading ? (
         <div className="space-y-4">
           <div className="h-16 rounded-2xl bg-ink/5 animate-pulse" />
           <div className="grid md:grid-cols-2 gap-4">
@@ -258,6 +285,40 @@ export function ReportsPage() {
               )}
             </Card>
           </div>
+
+          {/* Every item sold in range — the "top 5" chart above is just a
+              glance; this is the actual total-per-item breakdown someone
+              asking "what did we sell this week" needs. */}
+          <Card className="p-4 mb-4">
+            <div className="flex justify-between items-baseline mb-3">
+              <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40">All items sold</div>
+              <div className="text-xs text-ink/40">{data.allItems.length} item{data.allItems.length === 1 ? '' : 's'}</div>
+            </div>
+            {data.allItems.length === 0 ? (
+              <p className="text-xs text-ink/30 py-8 text-center">Nothing sold in this range yet.</p>
+            ) : (
+              <div className="max-h-80 overflow-y-auto -mx-1">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-surface">
+                    <tr className="text-[10px] uppercase tracking-wide text-ink/40 text-left">
+                      <th className="font-semibold pb-1.5 px-1">Item</th>
+                      <th className="font-semibold pb-1.5 px-1 text-right">Qty sold</th>
+                      <th className="font-semibold pb-1.5 px-1 text-right">Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.allItems.map((i) => (
+                      <tr key={i.name} className="border-t border-ink/5">
+                        <td className="py-1.5 px-1">{i.name}</td>
+                        <td className="py-1.5 px-1 text-right font-ticket font-semibold">{i.qty}</td>
+                        <td className="py-1.5 px-1 text-right font-ticket text-ink/60">Rs. {i.revenue}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
 
           {/* Table turnover + kitchen performance */}
           <div className="grid md:grid-cols-2 gap-4">

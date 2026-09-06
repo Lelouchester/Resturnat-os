@@ -54,15 +54,27 @@ interface OrdersState {
     customerId?: string
     mergedOrderIds?: string[]
   }) => Promise<void>
+  // Money collected from one guest while the table is still open and
+  // others are still eating — table stays occupied, order stays open,
+  // nothing about the bill closes. Distinct from completePayment, which
+  // always closes the order out. See due_amount comments in migration 011
+  // for why the eventual close still needs to know about this money.
+  recordPartialPayment: (orderId: string, payments: { methodKey: string; amount: number }[]) => Promise<void>
+  // Bills out a staff/no-charge order — items and inventory movement stay
+  // exactly as recorded already (that happened at KOT-send time), but no
+  // payment is collected, nothing is deposited, and due_amount is always 0.
+  // See migration 014.
+  closeNoChargeOrder: (orderId: string, params: { subtotal: number; total: number; mergedOrderIds?: string[] }) => Promise<void>
   cancelPaidOrder: (orderId: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 const ORDER_SELECT = `
   id, table_id, shift_id, waiter_id, customer_id, status, merged_into_order_id,
   subtotal, discount_amount, service_charge, tax_amount, tip_amount, total, split_guest_count,
-  opened_at, closed_at, activity_note,
+  opened_at, closed_at, activity_note, is_staff_order,
   restaurant_tables ( label ),
-  order_items ( id, menu_item_id, custom_name, quantity, unit_price, note, status, is_complimentary, void_reason, created_at, kot_printed_at, menu_items ( name, menu_categories ( exclude_from_discount ) ) )
+  order_items ( id, menu_item_id, custom_name, quantity, unit_price, note, status, is_complimentary, void_reason, created_at, kot_printed_at, menu_items ( name, menu_categories ( exclude_from_discount ) ) ),
+  payments ( amount )
 `
 
 function mapOrderRow(row: any): LiveOrder {
@@ -100,6 +112,8 @@ function mapOrderRow(row: any): LiveOrder {
     tipAmount: Number(row.tip_amount) || 0,
     total: Number(row.total) || 0,
     splitGuestCount: row.split_guest_count ?? 1,
+    advancePaid: (row.payments ?? []).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0),
+    isStaffOrder: row.is_staff_order ?? false,
     openedAt: row.opened_at,
     closedAt: row.closed_at ?? undefined,
     activityNote: row.activity_note ?? undefined,
@@ -156,6 +170,14 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, () =>
         loadOpenOrders().then((orders) => set({ orders }))
       )
+      // Same reasoning as order_items — payments has no branch_id of its
+      // own, and a partial payment recorded on one device (e.g. someone
+      // paying their share early) needs to show up as advancePaid on
+      // every other device looking at this table, not just after a
+      // full order/order_items change happens to fire too.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () =>
+        loadOpenOrders().then((orders) => set({ orders }))
+      )
       .subscribe()
   },
 
@@ -208,6 +230,11 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
         waiter_id: useAuthStore.getState().staff?.id ?? null,
         customer_id: table?.customerId ?? null,
         status: 'open',
+        // Stamped once, now, from the table's current flag — not re-derived
+        // later by joining back to restaurant_tables, so toggling a table's
+        // is_staff flag afterward never reclassifies a historical order. See
+        // migration 014.
+        is_staff_order: table?.isStaff ?? false,
       })
       .select()
       .single()
@@ -497,9 +524,51 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     set({ orders: await loadOpenOrders() })
   },
 
+  recordPartialPayment: async (orderId, payments) => {
+    const paymentRows = payments
+      .filter((p) => p.amount > 0)
+      .map((p) => {
+        const methodId = useAccountsStore.getState().methodIdForKey(p.methodKey)
+        return methodId ? { order_id: orderId, payment_method_id: methodId, amount: p.amount } : null
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+
+    if (paymentRows.length === 0) return
+
+    const { error } = await supabase.from('payments').insert(paymentRows)
+    if (error) {
+      console.error('[ordersStore] recordPartialPayment: writing payments failed', error)
+      return
+    }
+
+    // Same reasoning as completePayment — money collected now needs to
+    // land in Accounts now, not wait for the table to eventually close.
+    for (const p of payments) {
+      if (p.amount > 0) await useAccountsStore.getState().deposit(p.methodKey, p.amount, { orderId, reason: 'partial payment (table still open)' })
+    }
+
+    // Deliberately does NOT touch order.status, closed_at, due_amount, or
+    // the table's status — the table is still actively being used, this
+    // is just money collected along the way.
+    set({ orders: await loadOpenOrders() })
+  },
+
   completePayment: async (params) => {
     const { orderId, payments, mergedOrderIds = [], customerId } = params
     const order = get().orders.find((o) => o.id === orderId)
+
+    // Anything already collected earlier via recordPartialPayment (queried
+    // fresh rather than trusted from local state, since this is the last
+    // checkpoint before money math gets stamped permanently) — without
+    // this, a table with an early partial payment would wrongly show the
+    // remainder as still fully due, or hand back change that was never
+    // actually overpaid.
+    const { data: priorPaymentRows, error: priorErr } = await supabase
+      .from('payments')
+      .select('amount')
+      .eq('order_id', orderId)
+    if (priorErr) console.error('[ordersStore] completePayment: reading prior payments failed', priorErr)
+    const priorPaid = (priorPaymentRows ?? []).reduce((s, p) => s + (Number(p.amount) || 0), 0)
 
     const paymentRows = payments
       .filter((p) => p.amount > 0)
@@ -531,7 +600,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     // standard practice — if that's ever not true for a specific order,
     // this would need a manual correction via Accounts > Adjust balance.
     const totalPaid = payments.reduce((s, p) => s + p.amount, 0)
-    const changeGiven = totalPaid - params.total
+    const changeGiven = priorPaid + totalPaid - params.total
     if (changeGiven > 0) {
       await useAccountsStore.getState().withdraw('cash', changeGiven, { reason: 'Change given to customer' })
     }
@@ -555,8 +624,9 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
         // a report re-deriving "was this left due" from the now-incomplete
         // payments table would wrongly conclude the whole bill is still
         // unpaid, even though the real due tracker (customers.outstanding_due,
-        // set from this same totalPaid figure) is already correct.
-        due_amount: Math.max(0, params.total - totalPaid),
+        // set from this same totalPaid figure) is already correct. Includes
+        // any partial payment collected earlier via recordPartialPayment.
+        due_amount: Math.max(0, params.total - priorPaid - totalPaid),
       })
       .eq('id', orderId)
     if (closeErr) console.error('[ordersStore] completePayment: closing order failed', closeErr)
@@ -580,6 +650,55 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
         .update({ status: 'needs_cleaning', customer_name: null, customer_phone: null, customer_id: null, guest_count: null, seated_at: null, note: null })
         .in('id', tableIds)
       if (tableErr) console.error('[ordersStore] completePayment: freeing tables failed', tableErr)
+    }
+
+    set({ orders: await loadOpenOrders() })
+  },
+
+  closeNoChargeOrder: async (orderId, params) => {
+    const { mergedOrderIds = [] } = params
+    const order = get().orders.find((o) => o.id === orderId)
+
+    // Deliberately no payments inserted, no accounts/ledger deposit, and
+    // due_amount is always 0 — nothing was charged, so nothing is owed.
+    // total/subtotal are still stamped for real, though, since the point of
+    // this table is to keep an honest record of what staff consumed.
+    const { error: closeErr } = await supabase
+      .from('orders')
+      .update({
+        status: 'paid',
+        closed_at: new Date().toISOString(),
+        subtotal: params.subtotal,
+        discount_amount: 0,
+        service_charge: 0,
+        tax_amount: 0,
+        tip_amount: 0,
+        total: params.total,
+        due_amount: 0,
+        is_staff_order: true,
+      })
+      .eq('id', orderId)
+    if (closeErr) console.error('[ordersStore] closeNoChargeOrder: closing order failed', closeErr)
+
+    if (mergedOrderIds.length > 0) {
+      const { error: mergedErr } = await supabase
+        .from('orders')
+        .update({ status: 'paid', closed_at: new Date().toISOString(), due_amount: 0, is_staff_order: true })
+        .in('id', mergedOrderIds)
+      if (mergedErr) console.error('[ordersStore] closeNoChargeOrder: closing merged orders failed', mergedErr)
+    }
+
+    const tableIds = [
+      order?.tableId,
+      ...mergedOrderIds.map((id) => get().orders.find((o) => o.id === id)?.tableId),
+    ].filter((id): id is string => Boolean(id))
+
+    if (tableIds.length > 0) {
+      const { error: tableErr } = await supabase
+        .from('restaurant_tables')
+        .update({ status: 'needs_cleaning', customer_name: null, customer_phone: null, customer_id: null, guest_count: null, seated_at: null, note: null })
+        .in('id', tableIds)
+      if (tableErr) console.error('[ordersStore] closeNoChargeOrder: freeing tables failed', tableErr)
     }
 
     set({ orders: await loadOpenOrders() })

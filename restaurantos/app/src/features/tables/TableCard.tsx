@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Users, ArrowRightLeft, Merge, SprayCan, UserPlus, Trash2, Pencil } from 'lucide-react'
+import { Users, ArrowRightLeft, Merge, SprayCan, UserPlus, Trash2, Pencil, HandCoins } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { StatusPill } from '../../shared/ui/StatusPill'
 import type { TableStatus } from '../../shared/ui/StatusPill'
@@ -36,10 +36,12 @@ export function TableCard({
   onMerge,
   onMarkCleaned,
   onAssignCustomer,
+  onCollectPayment,
   onRemove,
   onEdit,
   mergedIntoLabel,
   runningTotal,
+  advancePaid,
 }: {
   table: RestaurantTable
   onSelect: (id: string) => void
@@ -47,14 +49,16 @@ export function TableCard({
   onMerge?: (id: string) => void
   onMarkCleaned?: (id: string) => void
   onAssignCustomer?: (id: string) => void
+  onCollectPayment?: (id: string) => void
   onRemove?: (id: string) => void
   onEdit?: (id: string) => void
   mergedIntoLabel?: string
   runningTotal?: number
+  advancePaid?: number
 }) {
   const minutes = useElapsedMinutes(table.seatedAt)
   const timeTone = minutes > 90 ? 'text-status-cleaning' : minutes > 45 ? 'text-status-occupied' : 'text-status-available'
-  const showQuickActions = (table.status === 'occupied' || table.status === 'billing') && (onMove || onMerge || onAssignCustomer)
+  const showQuickActions = (table.status === 'occupied' || table.status === 'billing') && (onMove || onMerge || (!table.isStaff && (onAssignCustomer || onCollectPayment)))
   const showCleanedAction = table.status === 'needs_cleaning' && onMarkCleaned
   const showRemoveAction = (table.status === 'available' || table.status === 'needs_cleaning') && onRemove
 
@@ -87,6 +91,9 @@ export function TableCard({
           {table.nickname && <div className="text-xs text-ink/40 truncate">{table.nickname}</div>}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          {table.isStaff && (
+            <span className="text-[10px] font-bold uppercase tracking-wide text-ink/50 bg-ink/5 rounded-md px-1.5 py-0.5">Staff</span>
+          )}
           <StatusPill status={table.status} />
           {showRemoveAction && (
             <span
@@ -128,6 +135,11 @@ export function TableCard({
           <div className="font-ticket font-semibold">Rs. {runningTotal}</div>
         )}
       </div>
+      {typeof advancePaid === 'number' && advancePaid > 0 && (
+        <div className="mt-1.5 text-[11px] font-semibold text-status-available bg-status-available-bg/50 rounded-lg px-2 py-1 w-fit">
+          Rs. {advancePaid} already collected
+        </div>
+      )}
 
       {showQuickActions && (
         <div className="mt-3 pt-2.5 border-t border-ink/5 flex items-center gap-3">
@@ -153,7 +165,7 @@ export function TableCard({
               <Merge size={12} /> Merge
             </span>
           )}
-          {onAssignCustomer && (
+          {onAssignCustomer && !table.isStaff && (
             <span
               role="button"
               tabIndex={0}
@@ -162,6 +174,17 @@ export function TableCard({
               className="flex items-center gap-1 text-[11px] font-semibold text-ink/50 hover:text-ink"
             >
               <UserPlus size={12} /> Customer
+            </span>
+          )}
+          {onCollectPayment && !table.isStaff && (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => { e.stopPropagation(); onCollectPayment(table.id) }}
+              onKeyDown={(e) => e.key === 'Enter' && (e.stopPropagation(), onCollectPayment(table.id))}
+              className="flex items-center gap-1 text-[11px] font-semibold text-ink/50 hover:text-ink"
+            >
+              <HandCoins size={12} /> Collect
             </span>
           )}
         </div>

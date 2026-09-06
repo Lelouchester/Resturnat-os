@@ -2,11 +2,14 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../../shared/lib/supabase'
 import { currentBranchId } from '../auth/authStore'
 
-export type ReportRange = 'Today' | '7 days' | '30 days'
+export type ReportRange = 'Today' | '7 days' | '30 days' | 'Custom'
 
 export interface ReportsData {
   revenueTrend: { day: string; revenue: number }[]
   topItems: { name: string; qty: number; revenue: number }[]
+  // Same underlying numbers as topItems, just not truncated to 5 — every
+  // menu item (and custom/off-menu line) sold in the range, most-sold first.
+  allItems: { name: string; qty: number; revenue: number }[]
   slowMovers: { name: string; qty: number }[]
   paymentSplit: { method: string; value: number; color: string }[]
   peakHours: { hour: string; orders: number }[]
@@ -34,6 +37,7 @@ const FALLBACK_COLORS = ['#6d4fd6', '#d43d3d', '#8b8f98']
 const EMPTY: ReportsData = {
   revenueTrend: [],
   topItems: [],
+  allItems: [],
   slowMovers: [],
   paymentSplit: [],
   peakHours: [],
@@ -55,8 +59,18 @@ function rangeStart(range: ReportRange): Date {
 // A dozen or so orders a day, even over 30 days, is a small enough result
 // set to just aggregate client-side in one round trip — same approach as
 // the rest of the app's reporting (useShiftLedger, fetchOrderHistory).
-async function loadReports(range: ReportRange): Promise<ReportsData> {
-  const from = rangeStart(range).toISOString()
+async function loadReports(range: ReportRange, customFrom?: string, customTo?: string): Promise<ReportsData> {
+  // Custom dates come from a plain <input type="date">, so they're
+  // 'YYYY-MM-DD' with no time component — anchor them to local midnight
+  // (start) and the last instant of that day (end) rather than letting the
+  // browser interpret them as UTC, which would quietly shift results by
+  // Nepal's +5:45 offset near the edges of the range.
+  const from = range === 'Custom' && customFrom
+    ? new Date(`${customFrom}T00:00:00`).toISOString()
+    : rangeStart(range).toISOString()
+  const to = range === 'Custom' && customTo
+    ? new Date(`${customTo}T23:59:59.999`).toISOString()
+    : new Date().toISOString()
 
   const { data, error } = await supabase
     .from('orders')
@@ -68,7 +82,13 @@ async function loadReports(range: ReportRange): Promise<ReportsData> {
     )
     .eq('branch_id', currentBranchId())
     .eq('status', 'paid')
+    // Staff/no-charge orders (migration 014) still carry a real `total` —
+    // that's item cost, not revenue — so they'd otherwise inflate every
+    // figure below (revenue trend, top items, payment split) with money
+    // that was never actually collected.
+    .eq('is_staff_order', false)
     .gte('closed_at', from)
+    .lte('closed_at', to)
 
   if (error) {
     console.error('[useReportsData] query failed', error)
@@ -100,6 +120,7 @@ async function loadReports(range: ReportRange): Promise<ReportsData> {
   }
   const itemsSorted = Array.from(itemStats.entries()).map(([name, s]) => ({ name, ...s })).sort((a, b) => b.qty - a.qty)
   const topItems = itemsSorted.slice(0, 5)
+  const allItems = itemsSorted
   const slowMovers = itemsSorted.slice(-3).reverse().map((i) => ({ name: i.name, qty: i.qty }))
 
   // Payment split — real methods only, colored consistently with the rest of the app.
@@ -181,6 +202,7 @@ async function loadReports(range: ReportRange): Promise<ReportsData> {
   return {
     revenueTrend,
     topItems,
+    allItems,
     slowMovers,
     paymentSplit,
     peakHours,
@@ -192,14 +214,22 @@ async function loadReports(range: ReportRange): Promise<ReportsData> {
   }
 }
 
-export function useReportsData(range: ReportRange) {
+export function useReportsData(range: ReportRange, customFrom?: string, customTo?: string) {
   const [data, setData] = useState<ReportsData>(EMPTY)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // A custom range with only one end picked so far isn't a real query yet
+    // — wait for both dates rather than firing off a request that'd
+    // silently fall back to "today" and confuse whoever's mid-pick.
+    if (range === 'Custom' && (!customFrom || !customTo)) {
+      setData(EMPTY)
+      setLoading(false)
+      return
+    }
     let cancelled = false
     setLoading(true)
-    loadReports(range).then((result) => {
+    loadReports(range, customFrom, customTo).then((result) => {
       if (!cancelled) {
         setData(result)
         setLoading(false)
@@ -208,7 +238,7 @@ export function useReportsData(range: ReportRange) {
     return () => {
       cancelled = true
     }
-  }, [range])
+  }, [range, customFrom, customTo])
 
   return { data, loading }
 }

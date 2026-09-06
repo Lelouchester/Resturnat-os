@@ -13,4 +13,5 @@ export interface RestaurantTable {
   waiterName?: string
   seatedAt?: string // ISO timestamp
   note?: string // transient, tied to the current party — e.g. "came from Table 3" — clears automatically when they leave
+  isStaff?: boolean // staff/no-charge table — billing closes with zero charge instead of collecting payment
 }

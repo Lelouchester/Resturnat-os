@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, X, CalendarClock, ArrowRightLeft, Merge } from 'lucide-react'
+import { Plus, X, CalendarClock, ArrowRightLeft, Merge, HandCoins } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { TableCard } from './TableCard'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
 import { useTablesStore } from './tablesStore'
 import { useOrdersStore } from '../orders/ordersStore'
+import { useSettingsStore } from '../settings/settingsStore'
 import { CustomerAssignField } from '../customers/CustomerAssignField'
 import { useReservationsStore } from '../reservations/reservationsStore'
 import type { RestaurantTable } from './types'
@@ -19,6 +20,7 @@ export function TablesPage() {
   const [mergingId, setMergingId] = useState<string | null>(null)
   const [assigningCustomerId, setAssigningCustomerId] = useState<string | null>(null)
   const [editingDetailsId, setEditingDetailsId] = useState<string | null>(null)
+  const [collectingId, setCollectingId] = useState<string | null>(null)
   const [addingTable, setAddingTable] = useState(false)
   const navigate = useNavigate()
 
@@ -45,6 +47,7 @@ export function TablesPage() {
   const transferOrderTable = useOrdersStore((s) => s.transferOrderTable)
   const mergeOrders = useOrdersStore((s) => s.mergeOrders)
   const attachCustomer = useOrdersStore((s) => s.attachCustomer)
+  const recordPartialPayment = useOrdersStore((s) => s.recordPartialPayment)
   const updateGuestInfo = useTablesStore((s) => s.updateGuestInfo)
 
   const totalsByTable = useMemo(() => {
@@ -57,6 +60,15 @@ export function TablesPage() {
       if (o.mergedIntoOrderId) continue
       const sum = o.items.filter((i) => i.status !== 'void').reduce((s, i) => s + (i.isComplimentary ? 0 : i.unitPrice * i.quantity), 0)
       map.set(o.tableId, (map.get(o.tableId) ?? 0) + sum)
+    }
+    return map
+  }, [orders])
+
+  const advanceByTable = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const o of orders) {
+      if (o.mergedIntoOrderId || !o.advancePaid) continue
+      map.set(o.tableId, (map.get(o.tableId) ?? 0) + o.advancePaid)
     }
     return map
   }, [orders])
@@ -164,10 +176,12 @@ export function TablesPage() {
                   onMove={setTransferringId}
                   onMerge={setMergingId}
                   onAssignCustomer={setAssigningCustomerId}
+                  onCollectPayment={setCollectingId}
                   onMarkCleaned={markCleaned}
                   onRemove={setRemovingId}
                   onEdit={setEditingDetailsId}
                   runningTotal={totalsByTable.get(t.id)}
+                  advancePaid={advanceByTable.get(t.id)}
                   mergedIntoLabel={mergedIntoLabel.get(t.id)}
                 />
               ))
@@ -251,6 +265,23 @@ export function TablesPage() {
       {addingTable && (
         <AddTableModal onClose={() => setAddingTable(false)} onAdd={(label, seats) => addTable(label, seats)} />
       )}
+
+      {collectingId && (() => {
+        const t = tables.find((tt) => tt.id === collectingId)
+        const order = orders.find((o) => o.tableId === collectingId && !o.mergedIntoOrderId && (o.status === 'open' || o.status === 'billing'))
+        if (!t || !order) return null
+        return (
+          <CollectPaymentModal
+            table={t}
+            order={order}
+            onClose={() => setCollectingId(null)}
+            onConfirm={async (methodKey, amount) => {
+              await recordPartialPayment(order.id, [{ methodKey, amount }])
+              setCollectingId(null)
+            }}
+          />
+        )
+      })()}
 
       {editingDetailsId && (() => {
         const t = tables.find((tt) => tt.id === editingDetailsId)
@@ -361,13 +392,89 @@ function MergeModal({
   )
 }
 
-function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label: string, seats: number) => Promise<{ ok: boolean; error?: string }> }) {
+function CollectPaymentModal({
+  table,
+  order,
+  onClose,
+  onConfirm,
+}: {
+  table: RestaurantTable
+  order: ReturnType<typeof useOrdersStore.getState>['orders'][number]
+  onClose: () => void
+  onConfirm: (methodKey: string, amount: number) => Promise<void>
+}) {
+  const allPaymentMethods = useSettingsStore((s) => s.paymentMethods)
+  const paymentMethods = useMemo(() => allPaymentMethods.filter((m) => !m.isInternal), [allPaymentMethods])
+  const [methodKey, setMethodKey] = useState(paymentMethods[0]?.key ?? '')
+  const [amount, setAmount] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const parsed = Number(amount) || 0
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-surface w-full md:max-w-sm md:rounded-3xl rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-ticket text-lg font-bold flex items-center gap-2"><HandCoins size={17} /> Collect payment — {table.label}</h2>
+          <button onClick={onClose} className="text-ink/40"><X size={20} /></button>
+        </div>
+        <p className="text-sm text-ink/50 mb-4">
+          For someone paying their share now while the table stays open — this doesn't close the bill or free up the table.
+          {order.advancePaid > 0 && ` Rs. ${order.advancePaid} already collected so far.`}
+        </p>
+
+        <div className="space-y-2 mb-4">
+          {paymentMethods.map((m) => (
+            <button
+              key={m.key}
+              onClick={() => setMethodKey(m.key)}
+              className={`w-full text-left rounded-xl border px-3.5 py-2.5 text-sm font-semibold transition-colors ${
+                methodKey === m.key ? 'border-ember bg-ember/5' : 'border-ink/10 hover:bg-ink/5'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Amount received</label>
+        <input
+          type="number"
+          min="0"
+          autoFocus
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0"
+          className="w-full text-lg font-ticket font-bold border border-ink/10 rounded-xl px-3.5 py-2.5 outline-none focus:border-ember mb-4"
+        />
+
+        <Button
+          className="w-full"
+          disabled={parsed <= 0 || !methodKey || submitting}
+          onClick={async () => {
+            setSubmitting(true)
+            try {
+              await onConfirm(methodKey, parsed)
+            } finally {
+              setSubmitting(false)
+            }
+          }}
+        >
+          {submitting ? 'Recording…' : `Record Rs. ${parsed || 0} received`}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label: string, seats: number, isStaff?: boolean) => Promise<{ ok: boolean; error?: string }> }) {
   const [label, setLabel] = useState('')
   const [seats, setSeats] = useState('4')
+  const [isStaff, setIsStaff] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function handleAdd() {
-    const result = await onAdd(label.trim(), Number(seats) || 2)
+    const result = await onAdd(label.trim(), Number(seats) || 2, isStaff)
     if (!result.ok) {
       setError(result.error ?? 'Something went wrong.')
       return
@@ -389,7 +496,7 @@ function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label:
           autoFocus
           value={label}
           onChange={(e) => { setLabel(e.target.value); setError(null) }}
-          placeholder="e.g. Table 9, Patio 1, Corner Booth"
+          placeholder="e.g. Table 9, Patio 1, Corner Booth, Staff"
           className="w-full mb-4 text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
         />
         <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Seats</label>
@@ -399,9 +506,17 @@ function AddTableModal({ onClose, onAdd }: { onClose: () => void; onAdd: (label:
           onChange={(e) => setSeats(e.target.value)}
           className="w-full mb-4 text-sm font-ticket border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
         />
+        <label className="flex items-center gap-2 mb-4 text-sm cursor-pointer">
+          <input type="checkbox" checked={isStaff} onChange={(e) => setIsStaff(e.target.checked)} className="rounded" />
+          <span>
+            <span className="font-semibold">Staff table (no charge)</span>
+            <span className="block text-xs text-ink/50">Orders here still track items and inventory, but billing closes with zero charge — nothing is ever marked due.</span>
+          </span>
+        </label>
         <Button className="w-full" disabled={!label.trim()} onClick={handleAdd}>
           Add table
         </Button>
+
       </div>
     </div>
   )

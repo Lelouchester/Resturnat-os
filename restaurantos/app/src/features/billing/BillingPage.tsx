@@ -42,6 +42,7 @@ export function BillingPage() {
   const mergeOrders = useOrdersStore((s) => s.mergeOrders)
   const unmergeOrder = useOrdersStore((s) => s.unmergeOrder)
   const completePayment = useOrdersStore((s) => s.completePayment)
+  const closeNoChargeOrder = useOrdersStore((s) => s.closeNoChargeOrder)
   const attachCustomer = useOrdersStore((s) => s.attachCustomer)
   const initTables = useTablesStore((s) => s.init)
 
@@ -161,8 +162,14 @@ export function BillingPage() {
     return shares
   }, [total, splitGuests])
 
+  // Anything collected earlier via the Floor plan's "Collect" action (a
+  // guest paying their share while the table was still open) — this money
+  // is already banked, so the amount actually still owed here is reduced
+  // by it. Merged-in tables' advances count too, same as their items do.
+  const advancePaid = (order?.advancePaid ?? 0) + mergedInOrders.reduce((s, o) => s + o.advancePaid, 0)
+
   const paid = paymentMethods.reduce((s, m) => s + (amounts[m.key] || 0), 0)
-  const remaining = total - paid // can go negative (change due)
+  const remaining = total - advancePaid - paid // can go negative (change due)
 
   // Typing just updates that one field — the "fill the rest into the other
   // method" only happens once you leave the field (blur/Tab), and only when
@@ -176,7 +183,7 @@ export function BillingPage() {
   function handleAmountBlur(key: string) {
     if (paymentMethods.length !== 2) return
     setAmounts((cur) => {
-      const stillOwed = total - paymentMethods.reduce((s, m) => s + (cur[m.key] || 0), 0)
+      const stillOwed = total - advancePaid - paymentMethods.reduce((s, m) => s + (cur[m.key] || 0), 0)
       if (stillOwed > 0) {
         const autoTarget = paymentMethods.find((m) => m.key !== key && !cur[m.key])
         if (autoTarget) return { ...cur, [autoTarget.key]: stillOwed }
@@ -187,7 +194,7 @@ export function BillingPage() {
   function payFullWith(key: string) {
     const next: Record<string, number> = {}
     paymentMethods.forEach((m) => (next[m.key] = 0))
-    next[key] = total
+    next[key] = Math.max(0, total - advancePaid)
     setAmounts(next)
   }
 
@@ -297,6 +304,40 @@ export function BillingPage() {
     }
   }
 
+  async function handleCloseNoCharge() {
+    if (!order || processingPayment) return
+    setProcessingPayment(true)
+    try {
+      setLastReceipt({
+        tableLabel: order.tableLabel,
+        customerName: 'Staff',
+        lines: effectiveLines.map((l) => ({ name: l.name, quantity: l.quantity, unitPrice: l.isComplimentary ? 0 : l.unitPrice, excludeFromDiscount: l.excludeFromDiscount, isComplimentary: l.isComplimentary })),
+        subtotal,
+        discount: 0,
+        discountPct: undefined,
+        serviceCharge: 0,
+        tax: 0,
+        tip: 0,
+        total: subtotal,
+      })
+
+      await closeNoChargeOrder(order.id, {
+        subtotal,
+        total: subtotal,
+        mergedOrderIds: mergedInOrders.map((o) => o.id),
+      })
+
+      setToast('Closed — no charge')
+      setTimeout(() => setToast(null), 2500)
+
+      const paidTableId = order.tableId
+      const next = billableOrders.find((o) => o.tableId !== paidTableId && !mergedInOrders.some((m) => m.id === o.id))
+      setActiveTableId(next ? next.tableId : null)
+    } finally {
+      setProcessingPayment(false)
+    }
+  }
+
   if (ordersLoading) {
     return <div className="p-6 max-w-4xl mx-auto pt-10 h-64 rounded-2xl bg-ink/5 animate-pulse" />
   }
@@ -329,6 +370,70 @@ export function BillingPage() {
         )}
         {showReviewQr && googleReviewLink && <ReviewQrCard link={googleReviewLink} onClose={() => setShowReviewQr(false)} />}
       </>
+    )
+  }
+
+  if (order.isStaffOrder) {
+    return (
+      <div className="p-4 md:p-6 max-w-lg mx-auto print:hidden">
+        <div className="mb-4">
+          <h1 className="font-ticket text-xl font-bold">Billing</h1>
+          <p className="text-sm text-ink/50">Staff table — no charge</p>
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto pb-4">
+          {billableOrders.map((o) => (
+            <button
+              key={o.tableId}
+              onClick={() => switchTable(o.tableId)}
+              className={`shrink-0 rounded-xl px-3.5 py-2 text-left border transition-colors ${
+                activeTableId === o.tableId ? 'bg-ink text-paper border-ink' : 'bg-surface text-ink border-ink/10'
+              }`}
+            >
+              <div className="font-ticket text-sm font-bold leading-none">{o.tableLabel}</div>
+              <div className={`text-[11px] mt-0.5 ${activeTableId === o.tableId ? 'text-paper/60' : 'text-ink/40'}`}>
+                {o.items.filter((i) => i.status !== 'void').length} item{o.items.length === 1 ? '' : 's'}
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <MergeTablesCard
+          order={order}
+          mergedInOrders={mergedInOrders}
+          billableOrders={billableOrders}
+          onMerge={(fromTableId) => mergeOrders(fromTableId, order.tableId)}
+          onUnmerge={(orderId) => unmergeOrder(orderId)}
+        />
+
+        <Card className="p-4">
+          <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-3">Items</div>
+          <div className="space-y-2 mb-4">
+            {effectiveLines.map((l) => (
+              <div key={l.id} className="flex justify-between text-sm">
+                <span>
+                  {l.quantity}× {l.name}
+                  {l.isComplimentary && <span className="ml-1.5 text-[10px] font-bold text-ember align-middle">COMP</span>}
+                </span>
+                <span className="font-ticket font-semibold">{l.isComplimentary ? 0 : l.unitPrice * l.quantity}</span>
+              </div>
+            ))}
+            {effectiveLines.length === 0 && <p className="text-xs text-ink/40">Nothing sent to the kitchen for this table yet.</p>}
+          </div>
+
+          <div className="border-t border-ink/10 pt-3 flex justify-between items-baseline">
+            <span className="text-sm font-semibold">Item cost (not charged)</span>
+            <span className="font-ticket text-xl font-bold">Rs. {subtotal}</span>
+          </div>
+          <p className="text-xs text-ink/40 mt-1.5">
+            Recorded for inventory and reporting only — no tax or service charge, and nothing is collected or marked due.
+          </p>
+
+          <Button className="w-full mt-4" disabled={processingPayment} onClick={handleCloseNoCharge}>
+            {processingPayment ? 'Closing…' : 'Close — no charge'}
+          </Button>
+        </Card>
+      </div>
     )
   }
 
@@ -524,6 +629,12 @@ export function BillingPage() {
             <span className="text-sm font-semibold">Total</span>
             <span className="font-ticket text-xl font-bold">Rs. {total}</span>
           </div>
+          {advancePaid > 0 && (
+            <div className="mt-2 flex justify-between items-baseline text-status-available">
+              <span className="text-xs font-semibold">Already collected</span>
+              <span className="font-ticket text-sm font-bold">− Rs. {advancePaid}</span>
+            </div>
+          )}
 
           <div className="mt-3 pt-3 border-t border-ink/5">
             <div className="flex items-center justify-between">

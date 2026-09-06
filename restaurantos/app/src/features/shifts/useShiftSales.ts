@@ -36,7 +36,7 @@ export function useShiftLedger(shiftId: string | undefined, openedAt: string | u
         .select('amount, reason, order_id, purchase_id, accounts!inner ( branch_id, payment_methods ( key ) )')
         .eq('accounts.branch_id', currentBranchId())
         .gte('created_at', openedAt),
-      supabase.from('orders').select('total').eq('shift_id', shiftId).eq('status', 'paid'),
+      supabase.from('orders').select('total').eq('shift_id', shiftId).eq('status', 'paid').eq('is_staff_order', false),
     ])
 
     if (error) console.error('[useShiftLedger] ledger query failed', error)
