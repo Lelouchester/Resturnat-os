@@ -1,9 +1,11 @@
 import { useReportsData } from './useReportsData'
 import { Card } from '../../shared/ui/Card'
+import { Button } from '../../shared/ui/Button'
 import { useInventoryStore } from '../inventory/inventoryStore'
 import { usePurchasingStore } from '../purchasing/purchasingStore'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Printer } from 'lucide-react'
 import { useEffect, useMemo } from 'react'
+import { DailyItemSalesPrintView } from './DailyItemSalesPrintView'
 
 // Deliberately simple — this is for someone who wants the headline numbers
 // in ten seconds, not someone digging into trends. That's what the
@@ -54,6 +56,14 @@ export function TodaySnapshot() {
           {data.orderCount} order{data.orderCount === 1 ? '' : 's'} · Rs. {avgOrderValue.toLocaleString()} average
         </div>
       </Card>
+
+      {!loading && (
+        <Button variant="secondary" className="w-full flex items-center justify-center gap-1.5" onClick={() => window.print()}>
+          <Printer size={15} /> Print daily item sales
+        </Button>
+      )}
+
+      <DailyItemSalesPrintView items={data.allItems} totalRevenue={data.totalRevenue} orderCount={data.orderCount} />
 
       {purchasesToday.length > 0 && (
         <Card className="p-3 flex items-center justify-between">
@@ -131,6 +141,9 @@ export function TodaySnapshot() {
                     <div className="text-xs text-ink/50 truncate">
                       {o.items.map((i) => (i.qty > 1 ? `${i.qty}× ${i.name}` : i.name)).join(', ')}
                     </div>
+                    {o.billingRemark && (
+                      <div className="text-[11px] text-ember font-medium mt-0.5">📝 {o.billingRemark}</div>
+                    )}
                   </div>
                   <div className="text-right shrink-0">
                     <div className="font-ticket font-semibold">Rs. {o.total.toLocaleString()}</div>

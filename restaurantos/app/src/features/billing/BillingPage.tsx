@@ -130,6 +130,7 @@ export function BillingPage() {
   // bill into a visit that builds someone's loyalty history.
   const [customerSearch, setCustomerSearch] = useState('')
   const [customerId, setCustomerId] = useState<string | null>(null)
+  const [remark, setRemark] = useState('')
   const [processingPayment, setProcessingPayment] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
 
@@ -203,6 +204,7 @@ export function BillingPage() {
     setAmounts({})
     setSplitGuests(1)
     setCustomerId(null)
+    setRemark('')
     setDiscountPct(0)
     setDiscountAmount(0)
     setDiscountMode('pct')
@@ -267,6 +269,7 @@ export function BillingPage() {
       splitGuestCount: splitGuests,
       customerId: customerId ?? undefined,
       mergedOrderIds: mergedInOrders.map((o) => o.id),
+      remark: remark.trim() || undefined,
     })
 
     if (customerId) {
@@ -290,6 +293,7 @@ export function BillingPage() {
     setAmounts({})
     setSplitGuests(1)
     setCustomerId(null)
+    setRemark('')
     // Without this, a discount (or a changed tax/service %) applied to the
     // table just paid would silently carry over and apply to whichever
     // table gets auto-advanced to next — a real risk of over-discounting
@@ -325,6 +329,7 @@ export function BillingPage() {
         subtotal,
         total: subtotal,
         mergedOrderIds: mergedInOrders.map((o) => o.id),
+        remark: remark.trim() || undefined,
       })
 
       setToast('Closed — no charge')
@@ -333,6 +338,7 @@ export function BillingPage() {
       const paidTableId = order.tableId
       const next = billableOrders.find((o) => o.tableId !== paidTableId && !mergedInOrders.some((m) => m.id === o.id))
       setActiveTableId(next ? next.tableId : null)
+      setRemark('')
     } finally {
       setProcessingPayment(false)
     }
@@ -428,6 +434,14 @@ export function BillingPage() {
           <p className="text-xs text-ink/40 mt-1.5">
             Recorded for inventory and reporting only — no tax or service charge, and nothing is collected or marked due.
           </p>
+
+          <label className="text-xs font-semibold text-ink/50 mt-4 mb-1.5 block">Remark (optional)</label>
+          <input
+            value={remark}
+            onChange={(e) => setRemark(e.target.value)}
+            placeholder="e.g. Birthday lunch for Sabina"
+            className="w-full text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
+          />
 
           <Button className="w-full mt-4" disabled={processingPayment} onClick={handleCloseNoCharge}>
             {processingPayment ? 'Closing…' : 'Close — no charge'}
@@ -711,6 +725,14 @@ export function BillingPage() {
               <Share2 size={15} /> Share
             </Button>
           </div>
+          <label className="text-xs font-semibold text-ink/50 mt-3 mb-1.5 block">Remark (optional)</label>
+          <input
+            value={remark}
+            onChange={(e) => setRemark(e.target.value)}
+            placeholder="e.g. Complained about wait time, gave 10% off"
+            className="w-full mb-1 text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
+          />
+
           <Button
             className="mt-2"
             disabled={(remaining > 0 && !customerId) || processingPayment}
@@ -721,6 +743,25 @@ export function BillingPage() {
           {remaining > 0 && !customerId && (
             <p className="text-xs text-status-cleaning text-center mt-1.5">Attach a customer above to mark the rest as due.</p>
           )}
+
+          {/* For a table that wasn't set up as a staff table ahead of time
+              — e.g. items were already added before anyone decided this was
+              a staff meal or a comp. Uses the same closeNoChargeOrder path
+              as a real staff table, which does stamp is_staff_order=true at
+              closing time regardless of how the table was configured — so
+              it's correctly excluded from revenue and shows up under staff
+              reporting the same as any other no-charge close. */}
+          <button
+            onClick={() => {
+              if (window.confirm(`Close ${order.tableLabel} with no charge? Rs. ${subtotal} in items will be recorded, but nothing will be collected or marked due.`)) {
+                handleCloseNoCharge()
+              }
+            }}
+            disabled={processingPayment}
+            className="w-full text-center text-xs font-semibold text-ink/40 hover:text-ink mt-2 py-1"
+          >
+            Mark as no-charge instead (staff / comp)
+          </button>
         </Card>
       </div>
 

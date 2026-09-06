@@ -56,6 +56,7 @@ export interface LiveOrder {
   // due_amount, which only ever gets stamped once the order actually closes.
   advancePaid: number
   isStaffOrder: boolean
+  billingRemark?: string
   openedAt: string
   closedAt?: string
   activityNote?: string // e.g. "Transferred from Table 1", "Merged with Table 3's order" — set at transfer/merge time

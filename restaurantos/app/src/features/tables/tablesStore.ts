@@ -23,7 +23,7 @@ interface TablesState {
   markCleaned: (tableId: string) => Promise<void>
   addTable: (label: string, seats: number, isStaff?: boolean) => Promise<{ ok: boolean; error?: string }>
   archiveTable: (tableId: string) => Promise<{ ok: boolean; error?: string }>
-  updateTableDetails: (tableId: string, info: { nickname?: string; note?: string }) => Promise<void>
+  updateTableDetails: (tableId: string, info: { nickname?: string; note?: string; isStaff?: boolean }) => Promise<void>
 }
 
 function mapRow(row: any): RestaurantTable {
@@ -148,6 +148,7 @@ export const useTablesStore = create<TablesState>((set, get) => ({
     const payload: Record<string, unknown> = {}
     if (info.nickname !== undefined) payload.nickname = info.nickname || null
     if (info.note !== undefined) payload.note = info.note || null
+    if (info.isStaff !== undefined) payload.is_staff = info.isStaff
     const { error } = await supabase.from('restaurant_tables').update(payload).eq('id', tableId)
     if (error) console.error('[tablesStore] updateTableDetails failed', error)
   },

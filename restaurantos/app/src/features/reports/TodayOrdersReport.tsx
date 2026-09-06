@@ -44,6 +44,9 @@ export function TodayOrdersReport() {
                 {o.activityNote && (
                   <div className="text-[11px] text-ink/35 italic mt-0.5">{o.activityNote}</div>
                 )}
+                {o.billingRemark && (
+                  <div className="text-[11px] text-ember font-medium mt-0.5">📝 {o.billingRemark}</div>
+                )}
               </div>
               <div className="flex items-center gap-3 shrink-0">
                 <span className="font-ticket font-bold text-sm">Rs. {o.total}</span>

@@ -528,11 +528,12 @@ function EditTableDetailsModal({
   onClose,
 }: {
   table: RestaurantTable
-  onSave: (details: { nickname?: string; note?: string }) => void
+  onSave: (details: { nickname?: string; note?: string; isStaff?: boolean }) => void
   onClose: () => void
 }) {
   const [nickname, setNickname] = useState(table.nickname ?? '')
   const [note, setNote] = useState(table.note ?? '')
+  const [isStaff, setIsStaff] = useState(table.isStaff ?? false)
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
@@ -562,7 +563,17 @@ function EditTableDetailsModal({
         />
         <p className="text-[11px] text-ink/40 mb-5">Clears on its own once this table's current party leaves — not permanent like the nickname above.</p>
 
-        <Button className="w-full" onClick={() => onSave({ nickname, note })}>
+        <label className="flex items-center gap-2 mb-1 text-sm cursor-pointer">
+          <input type="checkbox" checked={isStaff} onChange={(e) => setIsStaff(e.target.checked)} className="rounded" />
+          <span className="font-semibold">Staff table (no charge)</span>
+        </label>
+        <p className="text-[11px] text-ink/40 mb-5">
+          Only affects orders opened from now on — an order already in progress on this table keeps its original
+          billing type, so if items were already added before flipping this, close that particular order from
+          Billing directly instead (there's a "Mark as no-charge" option there too).
+        </p>
+
+        <Button className="w-full" onClick={() => onSave({ nickname, note, isStaff })}>
           Save
         </Button>
       </div>

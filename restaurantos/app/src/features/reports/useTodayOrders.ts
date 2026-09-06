@@ -9,6 +9,7 @@ export interface TodayOrderRow {
   total: number
   itemsSummary: string
   activityNote: string | null
+  billingRemark: string | null
 }
 
 /**
@@ -30,7 +31,7 @@ export function useTodayOrders() {
     const { data, error } = await supabase
       .from('orders')
       .select(
-        'id, closed_at, total, activity_note, restaurant_tables ( label ), customers ( name ), order_items ( quantity, custom_name, status, menu_items ( name ) )'
+        'id, closed_at, total, activity_note, billing_remark, restaurant_tables ( label ), customers ( name ), order_items ( quantity, custom_name, status, menu_items ( name ) )'
       )
       .eq('status', 'paid')
       .gte('closed_at', dayStart.toISOString())
@@ -48,6 +49,7 @@ export function useTodayOrders() {
         total: Number(o.total) || 0,
         itemsSummary: activeItems.map((i: any) => `${i.quantity}x ${i.custom_name ?? i.menu_items?.name ?? 'Item'}`).join(', '),
         activityNote: o.activity_note ?? null,
+        billingRemark: o.billing_remark ?? null,
       }
     })
 

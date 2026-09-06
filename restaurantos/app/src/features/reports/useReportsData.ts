@@ -24,6 +24,7 @@ export interface ReportsData {
     items: { name: string; qty: number }[]
     total: number
     paidVia: string[]
+    billingRemark: string | null
   }[]
 }
 
@@ -75,7 +76,7 @@ async function loadReports(range: ReportRange, customFrom?: string, customTo?: s
   const { data, error } = await supabase
     .from('orders')
     .select(
-      `id, table_id, opened_at, closed_at, total,
+      `id, table_id, opened_at, closed_at, total, billing_remark,
        restaurant_tables ( label ),
        order_items ( quantity, unit_price, is_complimentary, status, custom_name, created_at, status_updated_at, menu_items ( name ) ),
        payments ( amount, payment_methods ( key, label ) )`
@@ -96,15 +97,24 @@ async function loadReports(range: ReportRange, customFrom?: string, customTo?: s
   }
   const orders = data ?? []
 
-  // Revenue trend — by calendar date across the whole range.
-  const revenueByDay = new Map<string, number>()
+  // Revenue trend — grouped by an unambiguous ISO date key (not a
+  // re-parsed display string like "Sep 5", which has no year and sorts
+  // unreliably across a month/year boundary, and inconsistently across
+  // browsers — that was the cause of the trend line scrambling/dropping
+  // points before). The pretty "Sep 5" label is only produced at the end,
+  // purely for display.
+  const revenueByDay = new Map<string, number>() // key: 'YYYY-MM-DD'
   for (const o of orders) {
-    const day = new Date(o.closed_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-    revenueByDay.set(day, (revenueByDay.get(day) ?? 0) + Number(o.total))
+    const d = new Date(o.closed_at)
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    revenueByDay.set(key, (revenueByDay.get(key) ?? 0) + Number(o.total))
   }
   const revenueTrend = Array.from(revenueByDay.entries())
-    .map(([day, revenue]) => ({ day, revenue }))
-    .sort((a, b) => new Date(a.day).getTime() - new Date(b.day).getTime())
+    .sort((a, b) => a[0].localeCompare(b[0])) // ISO keys sort correctly as plain strings, no date re-parsing involved
+    .map(([key, revenue]) => ({
+      day: new Date(`${key}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+      revenue,
+    }))
 
   // Top items / slow movers — by quantity sold, excluding voided lines.
   const itemStats = new Map<string, { qty: number; revenue: number }>()
@@ -196,6 +206,7 @@ async function loadReports(range: ReportRange, customFrom?: string, customTo?: s
       ) as { name: string; qty: number }[],
       total: Number(o.total),
       paidVia: (o.payments ?? []).map((p: any) => p.payment_methods?.label ?? 'Other'),
+      billingRemark: o.billing_remark ?? null,
     }))
     .sort((a, b) => new Date(b.closedAt).getTime() - new Date(a.closedAt).getTime())
 

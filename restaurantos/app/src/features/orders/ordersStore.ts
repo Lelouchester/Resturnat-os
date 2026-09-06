@@ -53,6 +53,7 @@ interface OrdersState {
     splitGuestCount: number
     customerId?: string
     mergedOrderIds?: string[]
+    remark?: string
   }) => Promise<void>
   // Money collected from one guest while the table is still open and
   // others are still eating — table stays occupied, order stays open,
@@ -64,14 +65,14 @@ interface OrdersState {
   // exactly as recorded already (that happened at KOT-send time), but no
   // payment is collected, nothing is deposited, and due_amount is always 0.
   // See migration 014.
-  closeNoChargeOrder: (orderId: string, params: { subtotal: number; total: number; mergedOrderIds?: string[] }) => Promise<void>
+  closeNoChargeOrder: (orderId: string, params: { subtotal: number; total: number; mergedOrderIds?: string[]; remark?: string }) => Promise<void>
   cancelPaidOrder: (orderId: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 const ORDER_SELECT = `
   id, table_id, shift_id, waiter_id, customer_id, status, merged_into_order_id,
   subtotal, discount_amount, service_charge, tax_amount, tip_amount, total, split_guest_count,
-  opened_at, closed_at, activity_note, is_staff_order,
+  opened_at, closed_at, activity_note, is_staff_order, billing_remark,
   restaurant_tables ( label ),
   order_items ( id, menu_item_id, custom_name, quantity, unit_price, note, status, is_complimentary, void_reason, created_at, kot_printed_at, menu_items ( name, menu_categories ( exclude_from_discount ) ) ),
   payments ( amount )
@@ -114,6 +115,7 @@ function mapOrderRow(row: any): LiveOrder {
     splitGuestCount: row.split_guest_count ?? 1,
     advancePaid: (row.payments ?? []).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0),
     isStaffOrder: row.is_staff_order ?? false,
+    billingRemark: row.billing_remark ?? undefined,
     openedAt: row.opened_at,
     closedAt: row.closed_at ?? undefined,
     activityNote: row.activity_note ?? undefined,
@@ -627,6 +629,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
         // set from this same totalPaid figure) is already correct. Includes
         // any partial payment collected earlier via recordPartialPayment.
         due_amount: Math.max(0, params.total - priorPaid - totalPaid),
+        billing_remark: params.remark?.trim() || null,
       })
       .eq('id', orderId)
     if (closeErr) console.error('[ordersStore] completePayment: closing order failed', closeErr)
@@ -676,6 +679,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
         total: params.total,
         due_amount: 0,
         is_staff_order: true,
+        billing_remark: params.remark?.trim() || null,
       })
       .eq('id', orderId)
     if (closeErr) console.error('[ordersStore] closeNoChargeOrder: closing order failed', closeErr)
