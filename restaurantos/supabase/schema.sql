@@ -174,6 +174,7 @@ create table restaurant_tables (
   position_x integer, -- for the floor-plan grid layout
   position_y integer,
   is_archived boolean not null default false, -- "deleted" tables are archived, not hard-deleted — orders/reservations still reference them for real history
+  is_staff boolean not null default false, -- staff/no-charge table (migration 014) — any table can be flagged this way, no separate table type
   created_at timestamptz default now()
 );
 
@@ -306,7 +307,9 @@ create table orders (
   opened_at timestamptz default now(),
   closed_at timestamptz,
   activity_note text, -- e.g. "Transferred from Table 1", "Merged with Table 3's order" — set at transfer/merge time
-  due_amount numeric(10,2) default 0 -- stamped once at payment completion — see migration 011 for why this isn't reconstructed from payments later
+  due_amount numeric(10,2) default 0, -- stamped once at payment completion — see migration 011 for why this isn't reconstructed from payments later
+  is_staff_order boolean not null default false, -- stamped once at creation from the table's is_staff flag (migration 014) — reports filter on this, not on the table
+  billing_remark text -- staff-entered note at billing time (migration 015) — separate from activity_note, which is system-generated
 );
 
 create table order_items (
