@@ -1,0 +1,386 @@
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import {
+  ResponsiveContainer, LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, Tooltip, CartesianGrid,
+} from 'recharts'
+import { TrendingUp, AlertTriangle, Star, Users, Clock, Printer } from 'lucide-react'
+import { Card } from '../../shared/ui/Card'
+import { Button } from '../../shared/ui/Button'
+import { useReportsData, type ReportRange } from './useReportsData'
+import { TodaySnapshot } from './TodaySnapshot'
+import { ItemUsageReport } from './ItemUsageReport'
+import { TodayOrdersReport } from './TodayOrdersReport'
+import { RevenueVsPurchasesCard } from './RevenueVsPurchasesCard'
+import { DailyItemSalesPrintView } from './DailyItemSalesPrintView'
+import { useInventoryStore } from '../inventory/inventoryStore'
+import { useCustomersStore } from '../customers/customersStore'
+import { useAuthStore } from '../auth/authStore'
+
+const ALL_RANGES: ReportRange[] = ['Today', '7 days', '30 days', 'Custom']
+
+export function ReportsPage() {
+  const canSeeFullHistory = useAuthStore((s) => s.staff?.permissions.financials ?? false)
+  const RANGES = canSeeFullHistory ? ALL_RANGES : (['Today', '7 days'] as ReportRange[])
+  const [range, setRange] = useState<ReportRange>('7 days')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+  const effectiveRange = canSeeFullHistory ? range : (range === '30 days' || range === 'Custom' ? '7 days' : range)
+  const { data, loading } = useReportsData(effectiveRange, customFrom, customTo)
+
+  // Today's Snapshot answers "how did today go" in ten seconds — for a
+  // manager or shareholder checking in. Detailed Reports is the existing
+  // multi-range, chart-heavy view for actually analyzing trends. Different
+  // audiences, different jobs — kept as two clearly separate views rather
+  // than merging them into one increasingly busy page.
+  const [view, setView] = useState<'today' | 'detailed' | 'usage' | 'orders' | 'trends'>('today')
+
+  const inventoryItems = useInventoryStore((s) => s.items)
+  const initInventory = useInventoryStore((s) => s.init)
+  const customers = useCustomersStore((s) => s.customers)
+  const initCustomers = useCustomersStore((s) => s.init)
+
+  useEffect(() => {
+    initCustomers()
+    initInventory()
+  }, [initCustomers, initInventory])
+
+  const lowStockItems = useMemo(() => inventoryItems.filter((i) => i.currentStock <= i.minStock), [inventoryItems])
+  const topSpender = useMemo(
+    () => [...customers].sort((a, b) => b.lifetimeSpend - a.lifetimeSpend)[0],
+    [customers]
+  )
+  const repeatCustomerPct = useMemo(() => {
+    if (customers.length === 0) return 0
+    const repeat = customers.filter((c) => c.visitCount > 1).length
+    return Math.round((repeat / customers.length) * 100)
+  }, [customers])
+
+  const totalPayments = data.paymentSplit.reduce((s, p) => s + p.value, 0)
+  const busiestHour = data.peakHours.length > 0 ? [...data.peakHours].sort((a, b) => b.orders - a.orders)[0] : null
+  const rangeLabel = range === 'Custom' && customFrom && customTo ? `${customFrom} to ${customTo}` : range
+
+  return (
+    <div className="p-4 md:p-6 max-w-5xl mx-auto print:hidden">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div>
+          <h1 className="font-ticket text-xl font-bold">Reports</h1>
+          <p className="text-sm text-ink/50">{view === 'today' ? "A quick look at today" : view === 'usage' ? 'Purchased vs. sold, for linked items' : view === 'orders' ? "Today's billed orders" : view === 'trends' ? 'Revenue vs. purchases, at a glance' : 'Sales, performance, and business insights'}</p>
+        </div>
+        <div className="flex gap-1 bg-surface border border-ink/10 rounded-xl p-1">
+          <button
+            onClick={() => setView('today')}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${view === 'today' ? 'bg-ink text-paper' : 'text-ink/50'}`}
+          >
+            Today's Snapshot
+          </button>
+          <button
+            onClick={() => setView('trends')}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${view === 'trends' ? 'bg-ink text-paper' : 'text-ink/50'}`}
+          >
+            Trends
+          </button>
+          <button
+            onClick={() => setView('detailed')}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${view === 'detailed' ? 'bg-ink text-paper' : 'text-ink/50'}`}
+          >
+            Detailed Reports
+          </button>
+          <button
+            onClick={() => setView('usage')}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${view === 'usage' ? 'bg-ink text-paper' : 'text-ink/50'}`}
+          >
+            Item Usage
+          </button>
+          <button
+            onClick={() => setView('orders')}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${view === 'orders' ? 'bg-ink text-paper' : 'text-ink/50'}`}
+          >
+            Today's Orders
+          </button>
+        </div>
+      </div>
+
+      {view === 'today' ? (
+        <TodaySnapshot />
+      ) : view === 'usage' ? (
+        <ItemUsageReport />
+      ) : view === 'orders' ? (
+        <TodayOrdersReport />
+      ) : view === 'trends' ? (
+        <RevenueVsPurchasesCard />
+      ) : (
+        <>
+      <div className="flex items-center justify-end mb-4 gap-2 flex-wrap">
+        {range === 'Custom' && (
+          <div className="flex items-center gap-1.5">
+            <input
+              type="date"
+              value={customFrom}
+              max={customTo || undefined}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              className="text-xs border border-ink/10 rounded-lg px-2 py-1.5 outline-none focus:border-ember font-ticket"
+            />
+            <span className="text-ink/30 text-xs">to</span>
+            <input
+              type="date"
+              value={customTo}
+              min={customFrom || undefined}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => setCustomTo(e.target.value)}
+              className="text-xs border border-ink/10 rounded-lg px-2 py-1.5 outline-none focus:border-ember font-ticket"
+            />
+          </div>
+        )}
+        <div className="flex gap-1 bg-surface border border-ink/10 rounded-xl p-1">
+          {RANGES.map((r) => (
+            <button
+              key={r}
+              onClick={() => setRange(r)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                range === r ? 'bg-ink text-paper' : 'text-ink/50'
+              }`}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {range === 'Custom' && (!customFrom || !customTo) ? (
+        <p className="text-sm text-ink/30 italic py-16 text-center border border-dashed border-ink/10 rounded-2xl">
+          Pick a start and end date above.
+        </p>
+      ) : loading ? (
+        <div className="space-y-4">
+          <div className="h-16 rounded-2xl bg-ink/5 animate-pulse" />
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="h-52 rounded-2xl bg-ink/5 animate-pulse" />
+            <div className="h-52 rounded-2xl bg-ink/5 animate-pulse" />
+          </div>
+        </div>
+      ) : data.totalRevenue === 0 ? (
+        <p className="text-sm text-ink/30 italic py-16 text-center border border-dashed border-ink/10 rounded-2xl">
+          No paid orders in this range yet — reports fill in as the day goes.
+        </p>
+      ) : (
+        <>
+          {/* Business insights — auto-generated, cross-referencing other modules */}
+          <div className="grid sm:grid-cols-2 gap-2 mb-4">
+            {data.topItems[0] && (
+              <InsightRow icon={<Star size={14} />} text={<>Best seller: <b>{data.topItems[0].name}</b> ({data.topItems[0].qty} sold)</>} />
+            )}
+            {busiestHour && (
+              <InsightRow icon={<TrendingUp size={14} />} text={<>Busiest hour: <b>{busiestHour.hour}</b>, {busiestHour.orders} orders</>} />
+            )}
+            {topSpender && (
+              <InsightRow icon={<Users size={14} />} text={<>Highest spender: <b>{topSpender.name || 'Walk-in'}</b> (Rs. {topSpender.lifetimeSpend})</>} />
+            )}
+            {customers.length > 0 && (
+              <InsightRow icon={<Clock size={14} />} text={<>Repeat customers: <b>{repeatCustomerPct}%</b> came back more than once</>} />
+            )}
+            {lowStockItems.length > 0 && (
+              <InsightRow
+                danger
+                icon={<AlertTriangle size={14} />}
+                text={<>Stock risk: <b>{lowStockItems.map((i) => i.name).join(', ')}</b> at or below minimum</>}
+              />
+            )}
+            {data.slowMovers.length > 0 && (
+              <InsightRow text={<>Slowest movers: <b>{data.slowMovers.map((s) => s.name).join(', ')}</b> — consider a promo</>} />
+            )}
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4 mb-4">
+            {/* Revenue trend */}
+            <Card className="p-4">
+              <div className="flex justify-between items-baseline mb-1">
+                <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40">Revenue trend</div>
+                <div className="font-ticket font-bold">Rs. {data.totalRevenue.toLocaleString()}</div>
+              </div>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={data.revenueTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid stroke="rgba(0,0,0,0.05)" vertical={false} />
+                  <XAxis dataKey="day" tick={{ fontSize: 11, fill: 'rgba(20,22,26,0.4)' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: 'rgba(20,22,26,0.4)' }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: 12, border: '1px solid rgba(0,0,0,0.08)', fontSize: 12 }}
+                    formatter={(v: any) => [`Rs. ${v}`, 'Revenue']}
+                  />
+                  <Line type="monotone" dataKey="revenue" stroke="#e8862e" strokeWidth={2.5} dot={{ r: 3, fill: '#e8862e' }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </Card>
+
+            {/* Payment methods */}
+            <Card className="p-4">
+              <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-1">Payment methods</div>
+              {data.paymentSplit.length === 0 ? (
+                <p className="text-xs text-ink/30 py-16 text-center">No payments in this range.</p>
+              ) : (
+                <div className="flex items-center">
+                  <ResponsiveContainer width="55%" height={180}>
+                    <PieChart>
+                      <Pie data={data.paymentSplit} dataKey="value" nameKey="method" innerRadius={45} outerRadius={70} paddingAngle={3}>
+                        {data.paymentSplit.map((p) => (
+                          <Cell key={p.method} fill={p.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(v: any) => `Rs. ${v}`} contentStyle={{ borderRadius: 12, border: '1px solid rgba(0,0,0,0.08)', fontSize: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="flex-1 space-y-2">
+                    {data.paymentSplit.map((p) => (
+                      <div key={p.method} className="flex items-center justify-between text-sm">
+                        <span className="flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full" style={{ background: p.color }} />
+                          {p.method}
+                        </span>
+                        <span className="font-ticket font-semibold text-xs">{Math.round((p.value / totalPayments) * 100)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Card>
+
+            {/* Top selling items */}
+            <Card className="p-4">
+              <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-3">Top selling items</div>
+              {data.topItems.length === 0 ? (
+                <p className="text-xs text-ink/30 py-16 text-center">Nothing sold in this range yet.</p>
+              ) : (
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={data.topItems} layout="vertical" margin={{ top: 0, right: 20, left: 0, bottom: 0 }}>
+                    <XAxis type="number" hide />
+                    <YAxis
+                      dataKey="name"
+                      type="category"
+                      width={110}
+                      tick={{ fontSize: 11, fill: 'rgba(20,22,26,0.6)' }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <Tooltip
+                      contentStyle={{ borderRadius: 12, border: '1px solid rgba(0,0,0,0.08)', fontSize: 12 }}
+                      formatter={(v: any) => [`${v} sold`, '']}
+                    />
+                    <Bar dataKey="qty" fill="#e8862e" radius={[0, 6, 6, 0]} barSize={14} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </Card>
+
+            {/* Peak hours */}
+            <Card className="p-4">
+              <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-3">Peak hours</div>
+              {data.peakHours.length === 0 ? (
+                <p className="text-xs text-ink/30 py-16 text-center">No orders in this range yet.</p>
+              ) : (
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={data.peakHours} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid stroke="rgba(0,0,0,0.05)" vertical={false} />
+                    <XAxis dataKey="hour" tick={{ fontSize: 11, fill: 'rgba(20,22,26,0.4)' }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 11, fill: 'rgba(20,22,26,0.4)' }} axisLine={false} tickLine={false} />
+                    <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid rgba(0,0,0,0.08)', fontSize: 12 }} formatter={(v: any) => [`${v} orders`, '']} />
+                    <Bar dataKey="orders" fill="#14161a" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </Card>
+          </div>
+
+          {/* Every item sold in range — the "top 5" chart above is just a
+              glance; this is the actual total-per-item breakdown someone
+              asking "what did we sell this week" needs. */}
+          <Card className="p-4 mb-4">
+            <div className="flex justify-between items-baseline mb-3">
+              <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40">All items sold</div>
+              <div className="text-xs text-ink/40">{data.allItems.length} item{data.allItems.length === 1 ? '' : 's'}</div>
+            </div>
+            {data.allItems.length === 0 ? (
+              <p className="text-xs text-ink/30 py-8 text-center">Nothing sold in this range yet.</p>
+            ) : (
+              <div className="max-h-80 overflow-y-auto -mx-1">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-surface">
+                    <tr className="text-[10px] uppercase tracking-wide text-ink/40 text-left">
+                      <th className="font-semibold pb-1.5 px-1">Item</th>
+                      <th className="font-semibold pb-1.5 px-1 text-right">Qty sold</th>
+                      <th className="font-semibold pb-1.5 px-1 text-right">Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.allItems.map((i) => (
+                      <tr key={i.name} className="border-t border-ink/5">
+                        <td className="py-1.5 px-1">{i.name}</td>
+                        <td className="py-1.5 px-1 text-right font-ticket font-semibold">{i.qty}</td>
+                        <td className="py-1.5 px-1 text-right font-ticket text-ink/60">Rs. {i.revenue}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+
+          {data.allItems.length > 0 && (
+            <Button variant="secondary" className="w-full flex items-center justify-center gap-1.5 mb-4" onClick={() => window.print()}>
+              <Printer size={15} /> Print item sales for this range
+            </Button>
+          )}
+          <DailyItemSalesPrintView items={data.allItems} totalRevenue={data.totalRevenue} orderCount={data.orderCount} rangeLabel={rangeLabel} />
+
+          {/* Table turnover + kitchen performance */}
+          <div className="grid md:grid-cols-2 gap-4">
+            <Card className="p-4">
+              <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-3">Table turnover</div>
+              {data.tableTurnover.length === 0 ? (
+                <p className="text-xs text-ink/30 py-4 text-center">No completed tables in this range yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {data.tableTurnover.map((t) => (
+                    <div key={t.table} className="flex justify-between text-sm">
+                      <span className="font-medium">{t.table}</span>
+                      <span className="text-ink/50">
+                        <span className="font-ticket font-semibold text-ink">{t.avgMinutes}m</span> avg · {t.turns} turn{t.turns === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            <Card className="p-4">
+              <div className="font-ticket text-xs font-bold uppercase tracking-wider text-ink/40 mb-3">Kitchen performance</div>
+              {data.kitchenPerformance.avgPrepMinutes === 0 ? (
+                <p className="text-xs text-ink/30 py-4 text-center">No served items in this range yet.</p>
+              ) : (
+                <>
+                  <div className="flex justify-between text-sm mb-2">
+                    <span className="text-ink/60">Avg time to serve</span>
+                    <span className="font-ticket font-semibold">{data.kitchenPerformance.avgPrepMinutes} min</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-ink/60">Served within 15 min</span>
+                    <span className="font-ticket font-semibold text-status-available">{data.kitchenPerformance.onTimePct}%</span>
+                  </div>
+                </>
+              )}
+            </Card>
+          </div>
+        </>
+      )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function InsightRow({ icon, text, danger }: { icon?: ReactNode; text: ReactNode; danger?: boolean }) {
+  return (
+    <div className={`flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-sm ${danger ? 'bg-status-cleaning-bg text-status-cleaning' : 'bg-surface border border-ink/5'}`}>
+      {icon && <span className={danger ? '' : 'text-ember'}>{icon}</span>}
+      <span className={danger ? '' : 'text-ink/70'}>{text}</span>
+    </div>
+  )
+}
