@@ -8,6 +8,7 @@ import { useAccountsStore } from '../accounts/accountsStore'
 import { useSettingsStore } from '../settings/settingsStore'
 import { CATEGORY_LABELS } from './types'
 import { PurchaseTrendsView } from './PurchaseTrendsView'
+import { PurchaseItemHistoryView } from './PurchaseItemHistoryView'
 import type { PurchaseLine, PurchaseCategory } from './types'
 
 const NEW_ITEM_SENTINEL = '__new__'
@@ -46,7 +47,7 @@ export function PurchasingPage() {
   const [payingSupplier, setPayingSupplier] = useState<string | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
   const [cancelError, setCancelError] = useState<string | null>(null)
-  const [view, setView] = useState<'history' | 'trends'>('history')
+  const [view, setView] = useState<'history' | 'trends' | 'byItem'>('history')
   const [historyFrom, setHistoryFrom] = useState(() => new Date().toISOString().slice(0, 10))
   const [historyTo, setHistoryTo] = useState(() => new Date().toISOString().slice(0, 10))
   const [search, setSearch] = useState('')
@@ -208,11 +209,19 @@ export function PurchasingPage() {
           >
             Trends
           </button>
+          <button
+            onClick={() => setView('byItem')}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${view === 'byItem' ? 'bg-ink text-paper' : 'text-ink/50'}`}
+          >
+            By item
+          </button>
         </div>
       </div>
 
       {view === 'trends' ? (
         <PurchaseTrendsView />
+      ) : view === 'byItem' ? (
+        <PurchaseItemHistoryView />
       ) : (
         <>
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">

@@ -1,21 +1,21 @@
 import { useSettingsStore } from '../settings/settingsStore'
 
 // Same 80mm thermal-receipt sizing as ReceiptView/KOTPrintView — this is
-// meant to come off the same printer at closing time, not be a full A4
-// sheet. A long item list just means a longer strip of paper, which is
-// fine for a roll printer (unlike a page-size printer, which would need
-// pagination).
+// meant to come off the same printer, not be a full A4 sheet. A long item
+// list just means a longer strip of paper, which is fine for a roll
+// printer (unlike a page-size printer, which would need pagination).
 export function DailyItemSalesPrintView({
   items,
   totalRevenue,
   orderCount,
+  rangeLabel,
 }: {
   items: { name: string; qty: number; revenue: number }[]
   totalRevenue: number
   orderCount: number
+  rangeLabel: string
 }) {
   const name = useSettingsStore((s) => s.name)
-  const today = new Date()
 
   return (
     <div data-theme="light" className="hidden print:block">
@@ -23,8 +23,8 @@ export function DailyItemSalesPrintView({
       <div className="font-ticket text-ink bg-paper mx-auto" style={{ width: '72mm', padding: '3mm', fontSize: '11px', lineHeight: 1.4 }}>
         <div className="text-center mb-2">
           <div className="font-bold text-sm tracking-wide uppercase">{name || 'RestaurantOS'}</div>
-          <div className="text-[10px] mt-0.5">Daily item sales</div>
-          <div className="text-[10px]">{today.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' })}</div>
+          <div className="text-[10px] mt-0.5">Item sales — {rangeLabel}</div>
+          <div className="text-[10px]">Printed {new Date().toLocaleString()}</div>
         </div>
 
         <div className="border-t border-dashed border-black/60 my-1.5" />
@@ -36,7 +36,7 @@ export function DailyItemSalesPrintView({
         </div>
 
         {items.length === 0 ? (
-          <div className="text-[11px] text-center py-2">Nothing sold today.</div>
+          <div className="text-[11px] text-center py-2">Nothing sold in this range.</div>
         ) : (
           items.map((i) => (
             <div key={i.name} className="flex text-[11px] mb-0.5">

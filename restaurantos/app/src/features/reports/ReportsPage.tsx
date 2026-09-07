@@ -3,13 +3,15 @@ import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts'
-import { TrendingUp, AlertTriangle, Star, Users, Clock } from 'lucide-react'
+import { TrendingUp, AlertTriangle, Star, Users, Clock, Printer } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
+import { Button } from '../../shared/ui/Button'
 import { useReportsData, type ReportRange } from './useReportsData'
 import { TodaySnapshot } from './TodaySnapshot'
 import { ItemUsageReport } from './ItemUsageReport'
 import { TodayOrdersReport } from './TodayOrdersReport'
 import { RevenueVsPurchasesCard } from './RevenueVsPurchasesCard'
+import { DailyItemSalesPrintView } from './DailyItemSalesPrintView'
 import { useInventoryStore } from '../inventory/inventoryStore'
 import { useCustomersStore } from '../customers/customersStore'
 import { useAuthStore } from '../auth/authStore'
@@ -55,9 +57,10 @@ export function ReportsPage() {
 
   const totalPayments = data.paymentSplit.reduce((s, p) => s + p.value, 0)
   const busiestHour = data.peakHours.length > 0 ? [...data.peakHours].sort((a, b) => b.orders - a.orders)[0] : null
+  const rangeLabel = range === 'Custom' && customFrom && customTo ? `${customFrom} to ${customTo}` : range
 
   return (
-    <div className="p-4 md:p-6 max-w-5xl mx-auto">
+    <div className="p-4 md:p-6 max-w-5xl mx-auto print:hidden">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div>
           <h1 className="font-ticket text-xl font-bold">Reports</h1>
@@ -319,6 +322,13 @@ export function ReportsPage() {
               </div>
             )}
           </Card>
+
+          {data.allItems.length > 0 && (
+            <Button variant="secondary" className="w-full flex items-center justify-center gap-1.5 mb-4" onClick={() => window.print()}>
+              <Printer size={15} /> Print item sales for this range
+            </Button>
+          )}
+          <DailyItemSalesPrintView items={data.allItems} totalRevenue={data.totalRevenue} orderCount={data.orderCount} rangeLabel={rangeLabel} />
 
           {/* Table turnover + kitchen performance */}
           <div className="grid md:grid-cols-2 gap-4">
