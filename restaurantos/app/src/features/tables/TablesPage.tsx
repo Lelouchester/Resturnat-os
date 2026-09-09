@@ -276,8 +276,9 @@ export function TablesPage() {
             order={order}
             onClose={() => setCollectingId(null)}
             onConfirm={async (methodKey, amount) => {
-              await recordPartialPayment(order.id, [{ methodKey, amount }])
-              setCollectingId(null)
+              const result = await recordPartialPayment(order.id, [{ methodKey, amount }])
+              if (result.ok) setCollectingId(null)
+              return result
             }}
           />
         )
@@ -401,13 +402,14 @@ function CollectPaymentModal({
   table: RestaurantTable
   order: ReturnType<typeof useOrdersStore.getState>['orders'][number]
   onClose: () => void
-  onConfirm: (methodKey: string, amount: number) => Promise<void>
+  onConfirm: (methodKey: string, amount: number) => Promise<{ ok: boolean; error?: string }>
 }) {
   const allPaymentMethods = useSettingsStore((s) => s.paymentMethods)
   const paymentMethods = useMemo(() => allPaymentMethods.filter((m) => !m.isInternal), [allPaymentMethods])
   const [methodKey, setMethodKey] = useState(paymentMethods[0]?.key ?? '')
   const [amount, setAmount] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const parsed = Number(amount) || 0
 
   return (
@@ -422,6 +424,8 @@ function CollectPaymentModal({
           For someone paying their share now while the table stays open — this doesn't close the bill or free up the table.
           {order.advancePaid > 0 && ` Rs. ${order.advancePaid} already collected so far.`}
         </p>
+
+        {error && <p className="text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2 mb-4">{error}</p>}
 
         <div className="space-y-2 mb-4">
           {paymentMethods.map((m) => (
@@ -443,7 +447,7 @@ function CollectPaymentModal({
           min="0"
           autoFocus
           value={amount}
-          onChange={(e) => setAmount(e.target.value)}
+          onChange={(e) => { setAmount(e.target.value); setError(null) }}
           placeholder="0"
           className="w-full text-lg font-ticket font-bold border border-ink/10 rounded-xl px-3.5 py-2.5 outline-none focus:border-ember mb-4"
         />
@@ -453,8 +457,13 @@ function CollectPaymentModal({
           disabled={parsed <= 0 || !methodKey || submitting}
           onClick={async () => {
             setSubmitting(true)
+            setError(null)
             try {
-              await onConfirm(methodKey, parsed)
+              const result = await onConfirm(methodKey, parsed)
+              // Deliberately does NOT close the modal on failure — the
+              // person needs to see why, not have this quietly vanish as
+              // if the money was recorded when it wasn't.
+              if (!result.ok) setError(result.error ?? "Couldn't record this payment — try again.")
             } finally {
               setSubmitting(false)
             }

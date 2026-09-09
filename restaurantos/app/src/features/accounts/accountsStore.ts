@@ -37,7 +37,7 @@ interface AccountsState {
   init: () => void
   methodIdForKey: (key: string) => string | undefined
   deposit: (key: string, amount: number, opts?: { orderId?: string; reason?: string }) => Promise<void>
-  withdraw: (key: string, amount: number, opts?: { purchaseId?: string; reason?: string }) => Promise<void>
+  withdraw: (key: string, amount: number, opts?: { purchaseId?: string; orderId?: string; reason?: string }) => Promise<void>
   adjustBalance: (key: string, newBalance: number, note?: string) => Promise<{ ok: boolean; error?: string }>
   transferFunds: (fromKey: string, toKey: string, amount: number, note?: string) => Promise<{ ok: boolean; error?: string }>
   loadTransfers: () => Promise<void>
@@ -200,7 +200,14 @@ export const useAccountsStore = create<AccountsState>((set, get) => ({
 
   withdraw: async (key, amount, opts) => {
     if (amount <= 0) return
-    await moveBalance(key, -amount, opts?.reason ?? 'purchase payment', undefined, opts?.purchaseId)
+    // orderId matters here specifically for change given back on a sale —
+    // without it, this withdrawal has nothing to link it to the order it
+    // came from, and useShiftLedger's categorization (order_id present =
+    // revenue, otherwise negative = purchase) buckets it as a purchase
+    // instead of netting it against that order's revenue. The account
+    // balance itself is unaffected either way — this only matters for
+    // how "Cash revenue" vs "Cash purchases" reads on Accounts/Reports.
+    await moveBalance(key, -amount, opts?.reason ?? 'purchase payment', opts?.orderId, opts?.purchaseId)
     set({ ...(await loadBalances()) })
   },
 

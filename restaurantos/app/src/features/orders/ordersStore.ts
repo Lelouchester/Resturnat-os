@@ -54,18 +54,18 @@ interface OrdersState {
     customerId?: string
     mergedOrderIds?: string[]
     remark?: string
-  }) => Promise<void>
+  }) => Promise<{ ok: boolean; error?: string }>
   // Money collected from one guest while the table is still open and
   // others are still eating — table stays occupied, order stays open,
   // nothing about the bill closes. Distinct from completePayment, which
   // always closes the order out. See due_amount comments in migration 011
   // for why the eventual close still needs to know about this money.
-  recordPartialPayment: (orderId: string, payments: { methodKey: string; amount: number }[]) => Promise<void>
+  recordPartialPayment: (orderId: string, payments: { methodKey: string; amount: number }[]) => Promise<{ ok: boolean; error?: string }>
   // Bills out a staff/no-charge order — items and inventory movement stay
   // exactly as recorded already (that happened at KOT-send time), but no
   // payment is collected, nothing is deposited, and due_amount is always 0.
   // See migration 014.
-  closeNoChargeOrder: (orderId: string, params: { subtotal: number; total: number; mergedOrderIds?: string[]; remark?: string }) => Promise<void>
+  closeNoChargeOrder: (orderId: string, params: { subtotal: number; total: number; mergedOrderIds?: string[]; remark?: string }) => Promise<{ ok: boolean; error?: string }>
   cancelPaidOrder: (orderId: string) => Promise<{ ok: boolean; error?: string }>
 }
 
@@ -535,12 +535,12 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       })
       .filter((r): r is NonNullable<typeof r> => r !== null)
 
-    if (paymentRows.length === 0) return
+    if (paymentRows.length === 0) return { ok: true }
 
     const { error } = await supabase.from('payments').insert(paymentRows)
     if (error) {
       console.error('[ordersStore] recordPartialPayment: writing payments failed', error)
-      return
+      return { ok: false, error: error.message?.includes('already') ? error.message : "Couldn't record this payment — nothing was collected." }
     }
 
     // Same reasoning as completePayment — money collected now needs to
@@ -553,6 +553,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     // the table's status — the table is still actively being used, this
     // is just money collected along the way.
     set({ orders: await loadOpenOrders() })
+    return { ok: true }
   },
 
   completePayment: async (params) => {
@@ -569,7 +570,10 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       .from('payments')
       .select('amount')
       .eq('order_id', orderId)
-    if (priorErr) console.error('[ordersStore] completePayment: reading prior payments failed', priorErr)
+    if (priorErr) {
+      console.error('[ordersStore] completePayment: reading prior payments failed', priorErr)
+      return { ok: false, error: "Couldn't read this order's existing payments — try again." }
+    }
     const priorPaid = (priorPaymentRows ?? []).reduce((s, p) => s + (Number(p.amount) || 0), 0)
 
     const paymentRows = payments
@@ -582,7 +586,16 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
 
     if (paymentRows.length > 0) {
       const { error } = await supabase.from('payments').insert(paymentRows)
-      if (error) console.error('[ordersStore] completePayment: writing payments failed', error)
+      if (error) {
+        console.error('[ordersStore] completePayment: writing payments failed', error)
+        // Stop here — deliberately does NOT continue to deposit money or
+        // close the order. This is exactly the case migration 016's
+        // trigger is meant to catch (a payment on an already-closed
+        // order) — surfacing it here instead of silently carrying on is
+        // what makes that guard actually protective rather than just
+        // quietly swallowed by a console.error nobody's watching.
+        return { ok: false, error: error.message?.includes('already') ? error.message : "Couldn't record this payment — nothing was charged or closed. Try again, or check if this order was already settled." }
+      }
     }
 
     // Move real money: each collected payment deposits into that method's
@@ -601,10 +614,14 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     // anywhere. This assumes change is always given in cash, which is
     // standard practice — if that's ever not true for a specific order,
     // this would need a manual correction via Accounts > Adjust balance.
+    // Tagging this withdrawal with orderId (rather than leaving it
+    // unlinked) is what makes it net against this order's revenue instead
+    // of getting miscategorized as an unrelated "purchase" — see the
+    // comment on withdraw() in accountsStore for the full reasoning.
     const totalPaid = payments.reduce((s, p) => s + p.amount, 0)
     const changeGiven = priorPaid + totalPaid - params.total
     if (changeGiven > 0) {
-      await useAccountsStore.getState().withdraw('cash', changeGiven, { reason: 'Change given to customer' })
+      await useAccountsStore.getState().withdraw('cash', changeGiven, { orderId, reason: 'Change given to customer' })
     }
 
     const { error: closeErr } = await supabase
@@ -632,7 +649,16 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
         billing_remark: params.remark?.trim() || null,
       })
       .eq('id', orderId)
-    if (closeErr) console.error('[ordersStore] completePayment: closing order failed', closeErr)
+    if (closeErr) {
+      console.error('[ordersStore] completePayment: closing order failed', closeErr)
+      // Money's already been collected and deposited by this point — this
+      // is a genuinely awkward partial-failure state (unlike the payments
+      // insert failing above, there's no clean way to undo a deposit that
+      // already landed), so it's surfaced as an error rather than silently
+      // treated as success, even though it can't be fully rolled back here.
+      set({ orders: await loadOpenOrders() })
+      return { ok: false, error: 'Payment was recorded, but closing the order failed — check this table before billing it again.' }
+    }
 
     if (mergedOrderIds.length > 0) {
       const { error: mergedErr } = await supabase
@@ -656,11 +682,21 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     }
 
     set({ orders: await loadOpenOrders() })
+    return { ok: true }
   },
 
   closeNoChargeOrder: async (orderId, params) => {
     const { mergedOrderIds = [] } = params
     const order = get().orders.find((o) => o.id === orderId)
+
+    // No trigger guards this path the way migration 016 guards payments
+    // (there's no payments row involved), so this check is what stops a
+    // double-tap here from retroactively overwriting an order that's
+    // already been billed normally in the meantime.
+    const { data: currentRow, error: statusErr } = await supabase.from('orders').select('status').eq('id', orderId).single()
+    if (statusErr || !currentRow || currentRow.status === 'paid' || currentRow.status === 'cancelled') {
+      return { ok: false, error: 'This order is already closed — refresh and check before trying again.' }
+    }
 
     // Deliberately no payments inserted, no accounts/ledger deposit, and
     // due_amount is always 0 — nothing was charged, so nothing is owed.
@@ -682,7 +718,10 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
         billing_remark: params.remark?.trim() || null,
       })
       .eq('id', orderId)
-    if (closeErr) console.error('[ordersStore] closeNoChargeOrder: closing order failed', closeErr)
+    if (closeErr) {
+      console.error('[ordersStore] closeNoChargeOrder: closing order failed', closeErr)
+      return { ok: false, error: "Couldn't close this order — try again." }
+    }
 
     if (mergedOrderIds.length > 0) {
       const { error: mergedErr } = await supabase
@@ -706,6 +745,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     }
 
     set({ orders: await loadOpenOrders() })
+    return { ok: true }
   },
 
   // Reverses a completed (paid) order from today — the money it collected,

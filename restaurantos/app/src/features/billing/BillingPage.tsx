@@ -105,6 +105,7 @@ export function BillingPage() {
   const [amounts, setAmounts] = useState<Record<string, number>>({})
   const [splitGuests, setSplitGuests] = useState(1)
   const [toast, setToast] = useState<string | null>(null)
+  const [billingError, setBillingError] = useState<string | null>(null)
   const [showReviewQr, setShowReviewQr] = useState(false)
   // "Complete payment" immediately auto-advances the screen to the next
   // billable table — which means the live `order`/`discount`/etc. this
@@ -205,6 +206,7 @@ export function BillingPage() {
     setSplitGuests(1)
     setCustomerId(null)
     setRemark('')
+    setBillingError(null)
     setDiscountPct(0)
     setDiscountAmount(0)
     setDiscountMode('pct')
@@ -239,6 +241,7 @@ export function BillingPage() {
   async function handleCompletePayment() {
     if (!order || processingPayment) return
     setProcessingPayment(true)
+    setBillingError(null)
     try {
 
     // Snapshot the bill exactly as it's being paid, before anything about
@@ -257,7 +260,7 @@ export function BillingPage() {
       total,
     })
 
-    await completePayment({
+    const result = await completePayment({
       orderId: order.id,
       payments: paymentMethods.map((m) => ({ methodKey: m.key, amount: amounts[m.key] || 0 })),
       subtotal,
@@ -271,6 +274,16 @@ export function BillingPage() {
       mergedOrderIds: mergedInOrders.map((o) => o.id),
       remark: remark.trim() || undefined,
     })
+
+    if (!result.ok) {
+      // Stop here, deliberately — don't touch the customer's due, don't
+      // show a success toast, don't reset the screen or move to another
+      // table. The person billing this needs to see the failure and
+      // decide what to do, not have the screen quietly move on as if it
+      // went through.
+      setBillingError(result.error ?? "Something went wrong — this order wasn't closed.")
+      return
+    }
 
     if (customerId) {
       // Lifetime spend counts the whole bill, not just what was physically
@@ -311,6 +324,7 @@ export function BillingPage() {
   async function handleCloseNoCharge() {
     if (!order || processingPayment) return
     setProcessingPayment(true)
+    setBillingError(null)
     try {
       setLastReceipt({
         tableLabel: order.tableLabel,
@@ -325,12 +339,17 @@ export function BillingPage() {
         total: subtotal,
       })
 
-      await closeNoChargeOrder(order.id, {
+      const result = await closeNoChargeOrder(order.id, {
         subtotal,
         total: subtotal,
         mergedOrderIds: mergedInOrders.map((o) => o.id),
         remark: remark.trim() || undefined,
       })
+
+      if (!result.ok) {
+        setBillingError(result.error ?? "Something went wrong — this order wasn't closed.")
+        return
+      }
 
       setToast('Closed — no charge')
       setTimeout(() => setToast(null), 2500)
@@ -446,6 +465,9 @@ export function BillingPage() {
           <Button className="w-full mt-4" disabled={processingPayment} onClick={handleCloseNoCharge}>
             {processingPayment ? 'Closing…' : 'Close — no charge'}
           </Button>
+          {billingError && (
+            <p className="text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2 mt-3">{billingError}</p>
+          )}
         </Card>
       </div>
     )
@@ -762,6 +784,9 @@ export function BillingPage() {
           >
             Mark as no-charge instead (staff / comp)
           </button>
+          {billingError && (
+            <p className="text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2 mt-3">{billingError}</p>
+          )}
         </Card>
       </div>
 

@@ -10,6 +10,7 @@ import { useShiftStore } from '../shifts/shiftStore'
 import { useCustomersStore } from '../customers/customersStore'
 import { CustomerAssignField } from '../customers/CustomerAssignField'
 import { useRepeatOrderStore } from './repeatOrderStore'
+import { useInventoryStore } from '../inventory/inventoryStore'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 export function OrdersPage() {
@@ -30,6 +31,8 @@ export function OrdersPage() {
   const pendingRepeat = useRepeatOrderStore((s) => s.pending)
   const clearPendingRepeat = useRepeatOrderStore((s) => s.clear)
   const navigate = useNavigate()
+  const inventoryItems = useInventoryStore((s) => s.items)
+  const initInventory = useInventoryStore((s) => s.init)
 
   const tables = useTablesStore((s) => s.tables)
   const tablesLoading = useTablesStore((s) => s.loading)
@@ -48,7 +51,14 @@ export function OrdersPage() {
     initTables()
     initOrders()
     initCustomers()
-  }, [initMenu, initTables, initOrders, initCustomers])
+    initInventory()
+  }, [initMenu, initTables, initOrders, initCustomers, initInventory])
+
+  const inventoryById = useMemo(() => {
+    const map = new Map<string, (typeof inventoryItems)[number]>()
+    for (const i of inventoryItems) map.set(i.id, i)
+    return map
+  }, [inventoryItems])
 
   // Tabs across the top: any table already in use, plus whichever table was
   // just tapped from the Floor screen (even if it's still "available" — that's
@@ -270,6 +280,12 @@ export function OrdersPage() {
                 {items.map((item) => {
                   const price = effectivePrice(item)
                   const onHappyHour = price !== item.price
+                  // Only items directly tracked 1:1 against an inventory
+                  // item (beer, cigarettes, etc. — see trackedInventoryItemId)
+                  // get this; recipe-linked items are reporting-only and
+                  // were never meant to drive live stock checks here.
+                  const trackedItem = item.trackedInventoryItemId ? inventoryById.get(item.trackedInventoryItemId) : undefined
+                  const stockState = !trackedItem ? null : trackedItem.currentStock <= 0 ? 'out' : trackedItem.currentStock <= trackedItem.minStock ? 'low' : null
                   return (
                     <button
                       key={item.id}
@@ -282,9 +298,17 @@ export function OrdersPage() {
                           Combo: {item.comboItemIds.map((id) => menuItems.find((m) => m.id === id)?.name).filter(Boolean).join(', ')}
                         </div>
                       )}
-                      <div className="flex items-center gap-1.5 mt-2">
+                      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                         <span className="font-ticket text-sm font-bold text-ember">Rs. {price}</span>
                         {onHappyHour && <span className="text-[9px] font-bold text-ember bg-ember/10 rounded-full px-1.5 py-0.5">HAPPY HOUR</span>}
+                        {stockState === 'out' && (
+                          <span className="text-[9px] font-bold text-paper bg-status-cleaning rounded-full px-1.5 py-0.5">OUT OF STOCK</span>
+                        )}
+                        {stockState === 'low' && (
+                          <span className="text-[9px] font-bold text-status-occupied bg-status-occupied-bg rounded-full px-1.5 py-0.5">
+                            LOW STOCK · {trackedItem!.currentStock} left
+                          </span>
+                        )}
                       </div>
                     </button>
                   )
