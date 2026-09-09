@@ -338,6 +338,27 @@ create table payments (
   created_at timestamptz default now()
 );
 
+-- A payment should only ever land on an order that's still 'open' or
+-- 'billing' — this makes it impossible to add one to an already-closed
+-- order, regardless of a double-tap, a stale screen, or a client bug.
+-- See migration 016.
+create or replace function prevent_payment_on_closed_order() returns trigger as $$
+declare
+  v_status text;
+begin
+  select status into v_status from orders where id = new.order_id;
+  if v_status in ('paid', 'cancelled') then
+    raise exception 'This order is already % — a payment can''t be added to it. If this bill needs correcting, use Cancel/Reverse instead of billing it again.', v_status;
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists trg_prevent_payment_on_closed_order on payments;
+create trigger trg_prevent_payment_on_closed_order
+  before insert on payments
+  for each row execute function prevent_payment_on_closed_order();
+
 alter table ledger_entries add constraint ledger_entries_order_id_fkey foreign key (order_id) references orders(id);
 
 -- ----------------------------------------------------------------------------
