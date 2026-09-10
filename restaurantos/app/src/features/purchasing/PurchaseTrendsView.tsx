@@ -2,27 +2,19 @@ import { useMemo, useState } from 'react'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import { Card } from '../../shared/ui/Card'
 import { usePurchaseTrendsData, type TrendRange } from './usePurchaseTrendsData'
+import { nepalToday, nepalDaysAgo } from '../../shared/lib/nepalDate'
 
 const RANGES: TrendRange[] = ['7 days', '30 days', '90 days', 'custom']
 
-function todayISO() {
-  return new Date().toISOString().slice(0, 10)
-}
-function daysAgoISO(days: number) {
-  const d = new Date()
-  d.setDate(d.getDate() - days)
-  return d.toISOString().slice(0, 10)
-}
-
 export function PurchaseTrendsView() {
   const [preset, setPreset] = useState<TrendRange>('30 days')
-  const [customFrom, setCustomFrom] = useState(() => daysAgoISO(29))
-  const [customTo, setCustomTo] = useState(todayISO())
+  const [customFrom, setCustomFrom] = useState(() => nepalDaysAgo(29))
+  const [customTo, setCustomTo] = useState(nepalToday())
 
   const range = useMemo(() => {
-    if (preset === '7 days') return { from: daysAgoISO(6), to: todayISO() }
-    if (preset === '30 days') return { from: daysAgoISO(29), to: todayISO() }
-    if (preset === '90 days') return { from: daysAgoISO(89), to: todayISO() }
+    if (preset === '7 days') return { from: nepalDaysAgo(6), to: nepalToday() }
+    if (preset === '30 days') return { from: nepalDaysAgo(29), to: nepalToday() }
+    if (preset === '90 days') return { from: nepalDaysAgo(89), to: nepalToday() }
     return { from: customFrom, to: customTo }
   }, [preset, customFrom, customTo])
 

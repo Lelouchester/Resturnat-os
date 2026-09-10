@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, X, PackageCheck, Phone, Receipt, Trash2, Download, Ban } from 'lucide-react'
+import { nepalToday, nepalDayStartUTC, nepalDayEndUTC } from '../../shared/lib/nepalDate'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
 import { usePurchasingStore } from './purchasingStore'
@@ -48,8 +49,8 @@ export function PurchasingPage() {
   const [removeError, setRemoveError] = useState<string | null>(null)
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [view, setView] = useState<'history' | 'trends' | 'byItem'>('history')
-  const [historyFrom, setHistoryFrom] = useState(() => new Date().toISOString().slice(0, 10))
-  const [historyTo, setHistoryTo] = useState(() => new Date().toISOString().slice(0, 10))
+  const [historyFrom, setHistoryFrom] = useState(() => nepalToday())
+  const [historyTo, setHistoryTo] = useState(() => nepalToday())
   const [search, setSearch] = useState('')
 
   const purchasesInRange = useMemo(() => {
@@ -65,8 +66,8 @@ export function PurchasingPage() {
         return supplierMatch || itemMatch
       })
     }
-    const from = new Date(`${historyFrom}T00:00:00`).getTime()
-    const to = new Date(`${historyTo}T23:59:59`).getTime()
+    const from = new Date(nepalDayStartUTC(historyFrom)).getTime()
+    const to = new Date(nepalDayEndUTC(historyTo)).getTime()
     return purchases.filter((p) => {
       const t = new Date(p.createdAt).getTime()
       return t >= from && t <= to
@@ -231,7 +232,7 @@ export function PurchasingPage() {
             <div className="font-ticket text-lg font-bold mt-0.5">
               Rs. {purchasesTotal.toLocaleString()}
               <span className="text-xs font-normal text-ink/40 ml-1.5">
-                {search ? 'matching' : historyFrom === historyTo ? (historyFrom === new Date().toISOString().slice(0, 10) ? 'today' : historyFrom) : `${historyFrom} – ${historyTo}`}
+                {search ? 'matching' : historyFrom === historyTo ? (historyFrom === nepalToday() ? 'today' : historyFrom) : `${historyFrom} – ${historyTo}`}
               </span>
             </div>
           )}

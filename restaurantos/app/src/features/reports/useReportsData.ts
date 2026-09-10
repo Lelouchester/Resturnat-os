@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../shared/lib/supabase'
 import { currentBranchId } from '../auth/authStore'
+import { nepalToday, nepalDaysAgo, nepalDateKey, nepalDateKeyToLabel, nepalDayStartUTC, nepalDayEndUTC } from '../../shared/lib/nepalDate'
 
 export type ReportRange = 'Today' | '7 days' | '30 days' | 'Custom'
 
@@ -49,28 +50,27 @@ const EMPTY: ReportsData = {
   orderDetails: [],
 }
 
-function rangeStart(range: ReportRange): Date {
-  const d = new Date()
-  d.setHours(0, 0, 0, 0)
-  if (range === '7 days') d.setDate(d.getDate() - 6)
-  if (range === '30 days') d.setDate(d.getDate() - 29)
-  return d
+function rangeStart(range: ReportRange): string {
+  const today = nepalToday()
+  if (range === '7 days') return nepalDaysAgo(6, today)
+  if (range === '30 days') return nepalDaysAgo(29, today)
+  return today
 }
 
 // A dozen or so orders a day, even over 30 days, is a small enough result
 // set to just aggregate client-side in one round trip — same approach as
 // the rest of the app's reporting (useShiftLedger, fetchOrderHistory).
 async function loadReports(range: ReportRange, customFrom?: string, customTo?: string): Promise<ReportsData> {
-  // Custom dates come from a plain <input type="date">, so they're
-  // 'YYYY-MM-DD' with no time component — anchor them to local midnight
-  // (start) and the last instant of that day (end) rather than letting the
-  // browser interpret them as UTC, which would quietly shift results by
-  // Nepal's +5:45 offset near the edges of the range.
+  // Anchored to Nepal's actual calendar day, not the viewing device's own
+  // clock/timezone — see shared/lib/nepalDate.ts. A plain "T00:00:00" with
+  // no offset gets interpreted differently depending on which device (or
+  // which side, browser vs database) parses it, which is exactly what
+  // caused this to intermittently disagree with itself before.
   const from = range === 'Custom' && customFrom
-    ? new Date(`${customFrom}T00:00:00`).toISOString()
-    : rangeStart(range).toISOString()
+    ? nepalDayStartUTC(customFrom)
+    : nepalDayStartUTC(rangeStart(range))
   const to = range === 'Custom' && customTo
-    ? new Date(`${customTo}T23:59:59.999`).toISOString()
+    ? nepalDayEndUTC(customTo)
     : new Date().toISOString()
 
   const { data, error } = await supabase
@@ -97,22 +97,22 @@ async function loadReports(range: ReportRange, customFrom?: string, customTo?: s
   }
   const orders = data ?? []
 
-  // Revenue trend — grouped by an unambiguous ISO date key (not a
-  // re-parsed display string like "Sep 5", which has no year and sorts
-  // unreliably across a month/year boundary, and inconsistently across
-  // browsers — that was the cause of the trend line scrambling/dropping
-  // points before). The pretty "Sep 5" label is only produced at the end,
-  // purely for display.
-  const revenueByDay = new Map<string, number>() // key: 'YYYY-MM-DD'
+  // Revenue trend — grouped by a Nepal-anchored calendar-day key, not the
+  // device's own local timezone. A transaction between midnight and
+  // 5:45am Nepal time falls on a different day depending on which
+  // timezone the viewing device happens to be set to — that device
+  // dependency (not just the sort order, which was fixed once already)
+  // is what caused this to keep breaking. The pretty "Sep 5" label is
+  // only produced at the end, purely for display.
+  const revenueByDay = new Map<string, number>() // key: 'YYYY-MM-DD', Nepal calendar day
   for (const o of orders) {
-    const d = new Date(o.closed_at)
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const key = nepalDateKey(o.closed_at)
     revenueByDay.set(key, (revenueByDay.get(key) ?? 0) + Number(o.total))
   }
   const revenueTrend = Array.from(revenueByDay.entries())
     .sort((a, b) => a[0].localeCompare(b[0])) // ISO keys sort correctly as plain strings, no date re-parsing involved
     .map(([key, revenue]) => ({
-      day: new Date(`${key}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+      day: nepalDateKeyToLabel(key),
       revenue,
     }))
 

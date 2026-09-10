@@ -3,6 +3,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGri
 import { Card } from '../../shared/ui/Card'
 import { useInventoryStore } from '../inventory/inventoryStore'
 import { usePurchasingStore } from '../purchasing/purchasingStore'
+import { nepalToday, nepalDaysAgo, nepalDayStartUTC, nepalDateKey, nepalDateKeyToLabel } from '../../shared/lib/nepalDate'
 import type { Supplier } from './types'
 
 const RANGE_DAYS: Record<'30 days' | '90 days' | '180 days' | 'All time', number | null> = {
@@ -33,13 +34,15 @@ export function PurchaseItemHistoryView() {
     [inventoryItems]
   )
 
+  // Nepal-anchored, not device-local — same reasoning as everywhere else
+  // date bucketing happens in this app (see shared/lib/nepalDate.ts). A
+  // cutoff computed from the device's own midnight could quietly include
+  // or exclude a purchase near the boundary depending on the viewer's
+  // timezone/region setting.
   const cutoff = useMemo(() => {
     const days = RANGE_DAYS[rangeKey]
     if (days === null) return null
-    const d = new Date()
-    d.setDate(d.getDate() - days)
-    d.setHours(0, 0, 0, 0)
-    return d
+    return new Date(nepalDayStartUTC(nepalDaysAgo(days, nepalToday())))
   }, [rangeKey])
 
   const records = useMemo(() => {
@@ -60,20 +63,20 @@ export function PurchaseItemHistoryView() {
 
   const selectedItem = activeItems.find((i) => i.id === itemId)
 
-  // Bucketed by calendar date for the chart — someone buying the same item
-  // twice in one day (a top-up order) should read as one taller bar for
-  // that day, not two separate points that make the rhythm harder to read.
+  // Bucketed by Nepal calendar date for the chart — someone buying the
+  // same item twice in one day (a top-up order) should read as one taller
+  // bar for that day, not two separate points that make the rhythm harder
+  // to read. Nepal-anchored for the same reason as the cutoff above.
   const chartData = useMemo(() => {
-    const byDay = new Map<string, number>() // key: 'YYYY-MM-DD'
+    const byDay = new Map<string, number>() // key: 'YYYY-MM-DD', Nepal calendar day
     for (const r of records) {
-      const d = new Date(r.date)
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const key = nepalDateKey(r.date)
       byDay.set(key, (byDay.get(key) ?? 0) + r.quantity)
     }
     return Array.from(byDay.entries())
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([key, qty]) => ({
-        day: new Date(`${key}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+        day: nepalDateKeyToLabel(key),
         qty,
       }))
   }, [records])

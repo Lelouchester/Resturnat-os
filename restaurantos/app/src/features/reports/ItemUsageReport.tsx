@@ -4,15 +4,7 @@ import { useInventoryStore } from '../inventory/inventoryStore'
 import { useMenuLinksStore } from '../inventory/menuLinksStore'
 import { useMenuStore } from '../menu/menuStore'
 import { useItemUsageData, type UsagePeriod } from './useItemUsageData'
-
-function todayISO() {
-  return new Date().toISOString().slice(0, 10)
-}
-function daysAgoISO(days: number) {
-  const d = new Date()
-  d.setDate(d.getDate() - days)
-  return d.toISOString().slice(0, 10)
-}
+import { nepalToday, nepalDaysAgo } from '../../shared/lib/nepalDate'
 
 export function ItemUsageReport() {
   const inventoryItems = useInventoryStore((s) => s.items)
@@ -29,8 +21,8 @@ export function ItemUsageReport() {
   }, [initInventory, initMenuLinks, initMenu])
 
   const [period, setPeriod] = useState<UsagePeriod>('week')
-  const [customFrom, setCustomFrom] = useState(() => daysAgoISO(6))
-  const [customTo, setCustomTo] = useState(todayISO())
+  const [customFrom, setCustomFrom] = useState(() => nepalDaysAgo(6))
+  const [customTo, setCustomTo] = useState(nepalToday())
 
   // Presets are just a shortcut for picking the same from/to range a manual
   // pick would produce — the hook always gets an explicit range either way,
@@ -38,8 +30,8 @@ export function ItemUsageReport() {
   // results, which is exactly what lets you cross-check this against
   // another screen by matching the range exactly.
   const range = useMemo(() => {
-    if (period === 'week') return { from: daysAgoISO(6), to: todayISO() }
-    if (period === 'month') return { from: daysAgoISO(29), to: todayISO() }
+    if (period === 'week') return { from: nepalDaysAgo(6), to: nepalToday() }
+    if (period === 'month') return { from: nepalDaysAgo(29), to: nepalToday() }
     return { from: customFrom, to: customTo }
   }, [period, customFrom, customTo])
 

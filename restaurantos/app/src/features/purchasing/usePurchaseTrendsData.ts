@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../shared/lib/supabase'
+import { nepalDateKey, nepalDateKeyToLabel, nepalWeekStartKey, nepalDayStartUTC, nepalDayEndUTC } from '../../shared/lib/nepalDate'
 
 export type TrendRange = '7 days' | '30 days' | '90 days' | 'custom'
 
@@ -13,11 +14,12 @@ export interface PurchaseTrendsData {
 
 const EMPTY: PurchaseTrendsData = { spendTrend: [], topItems: [], bySupplier: [], totalSpend: 0, purchaseCount: 0 }
 
+// Nepal-anchored, never device-local — see shared/lib/nepalDate.ts for why
+// bucketing by a display string (the old approach here) caused this trend
+// to intermittently scramble depending on which device generated it.
 function bucketKey(date: Date, weekly: boolean): string {
-  if (!weekly) return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-  const weekStart = new Date(date)
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay())
-  return weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  const dayKey = nepalDateKey(date)
+  return weekly ? nepalWeekStartKey(dayKey) : dayKey
 }
 
 /**
@@ -35,8 +37,8 @@ export function usePurchaseTrendsData(range: { from: string; to: string }) {
 
     async function load() {
       setLoading(true)
-      const from = `${range.from}T00:00:00`
-      const to = `${range.to}T23:59:59`
+      const from = nepalDayStartUTC(range.from)
+      const to = nepalDayEndUTC(range.to)
 
       const { data: lines, error } = await supabase
         .from('purchase_lines')
@@ -97,7 +99,7 @@ export function usePurchaseTrendsData(range: { from: string; to: string }) {
       const spendTrend = Array.from(trendMap.entries())
         .map(([period, v]) => ({ period, spend: v.spend, sortKey: v.sortKey }))
         .sort((a, b) => a.sortKey - b.sortKey)
-        .map(({ period, spend }) => ({ period, spend }))
+        .map(({ period, spend }) => ({ period: nepalDateKeyToLabel(period), spend }))
       const topItems = Array.from(itemMap.values())
         .sort((a, b) => b.spend - a.spend)
         .slice(0, 10)

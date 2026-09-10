@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../shared/lib/supabase'
+import { nepalDayStartUTC, nepalDayEndUTC } from '../../shared/lib/nepalDate'
 
 export type UsagePeriod = 'week' | 'month' | 'custom'
 
@@ -39,8 +40,8 @@ export function useItemUsageData(
       }
       setLoading(true)
 
-      const from = `${range.from}T00:00:00`
-      const to = `${range.to}T23:59:59`
+      const from = nepalDayStartUTC(range.from)
+      const to = nepalDayEndUTC(range.to)
       const inventoryIds = itemsWithLinks.map((i) => i.id)
       const allMenuIds = Array.from(new Set(itemsWithLinks.flatMap((i) => i.linkedMenuItemIds)))
 

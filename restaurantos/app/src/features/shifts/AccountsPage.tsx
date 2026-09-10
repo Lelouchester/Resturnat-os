@@ -6,6 +6,7 @@ import { ReceiptView } from '../billing/ReceiptView'
 import { useShiftStore } from './shiftStore'
 import { useSettingsStore, type PaymentMethodConfig } from '../settings/settingsStore'
 import { useAccountsStore } from '../accounts/accountsStore'
+import { nepalToday, nepalDaysAgo, nepalDayStartUTC, nepalDayEndUTC } from '../../shared/lib/nepalDate'
 import { ArrowRightLeft, ShieldAlert, Pencil } from 'lucide-react'
 import { useShiftLedger, fetchOrderHistory, type OrderHistoryRow } from './useShiftSales'
 import { usePurchasingStore } from '../purchasing/purchasingStore'
@@ -405,9 +406,9 @@ async function buildDailyBackup(
   byMethod: Record<string, { revenue: number; purchases: number }>,
   closingBalances: MethodBalances
 ) {
-  const date = new Date().toISOString().slice(0, 10)
-  const dayStart = `${date}T00:00:00`
-  const dayEnd = `${date}T23:59:59`
+  const date = nepalToday()
+  const dayStart = nepalDayStartUTC(date)
+  const dayEnd = nepalDayEndUTC(date)
 
   const orders = await fetchOrderHistory(dayStart, dayEnd, 500)
 
@@ -459,12 +460,6 @@ function downloadBackupJson(backup: { date: string }) {
   URL.revokeObjectURL(url)
 }
 
-function todayISO(daysAgo = 0) {
-  const d = new Date()
-  d.setDate(d.getDate() - daysAgo)
-  return d.toISOString().slice(0, 10)
-}
-
 function downloadTransfersCsv(rows: ReturnType<typeof useAccountsStore.getState>['transfers']) {
   const header = ['Date/time', 'From', 'To', 'Amount', 'Note', 'By'].map(csvField)
   const lines = rows.map((t) =>
@@ -482,7 +477,7 @@ function downloadTransfersCsv(rows: ReturnType<typeof useAccountsStore.getState>
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `transfers_${todayISO(0)}.csv`
+  a.download = `transfers_${nepalToday()}.csv`
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -769,9 +764,9 @@ function AdjustBalanceModal({
 
 function OrderHistoryCard({ onPrint }: { onPrint: (row: OrderHistoryRow) => void }) {
   const canSeeFullHistory = useAuthStore((s) => s.staff?.permissions.financials ?? false)
-  const earliestSelectable = canSeeFullHistory ? undefined : todayISO(7)
-  const [from, setFrom] = useState(canSeeFullHistory ? todayISO(0) : todayISO(7))
-  const [to, setTo] = useState(todayISO(0))
+  const earliestSelectable = canSeeFullHistory ? undefined : nepalDaysAgo(7)
+  const [from, setFrom] = useState(canSeeFullHistory ? nepalToday() : nepalDaysAgo(7))
+  const [to, setTo] = useState(nepalToday())
   const [rows, setRows] = useState<OrderHistoryRow[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -779,7 +774,7 @@ function OrderHistoryCard({ onPrint }: { onPrint: (row: OrderHistoryRow) => void
   async function search() {
     setLoading(true)
     const effectiveFrom = earliestSelectable && from < earliestSelectable ? earliestSelectable : from
-    const data = await fetchOrderHistory(`${effectiveFrom}T00:00:00`, `${to}T23:59:59`)
+    const data = await fetchOrderHistory(nepalDayStartUTC(effectiveFrom), nepalDayEndUTC(to))
     setRows(data)
     setLoading(false)
   }

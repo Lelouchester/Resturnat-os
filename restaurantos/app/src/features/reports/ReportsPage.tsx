@@ -6,6 +6,7 @@ import {
 import { TrendingUp, AlertTriangle, Star, Users, Clock, Printer } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
+import { nepalToday } from '../../shared/lib/nepalDate'
 import { useReportsData, type ReportRange } from './useReportsData'
 import { TodaySnapshot } from './TodaySnapshot'
 import { ItemUsageReport } from './ItemUsageReport'
@@ -125,7 +126,7 @@ export function ReportsPage() {
               type="date"
               value={customTo}
               min={customFrom || undefined}
-              max={new Date().toISOString().slice(0, 10)}
+              max={nepalToday()}
               onChange={(e) => setCustomTo(e.target.value)}
               className="text-xs border border-ink/10 rounded-lg px-2 py-1.5 outline-none focus:border-ember font-ticket"
             />
