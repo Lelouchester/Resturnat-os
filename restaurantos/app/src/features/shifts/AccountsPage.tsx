@@ -770,12 +770,22 @@ function OrderHistoryCard({ onPrint }: { onPrint: (row: OrderHistoryRow) => void
   const [rows, setRows] = useState<OrderHistoryRow[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [possiblyTruncated, setPossiblyTruncated] = useState(false)
+
+  // fetchOrderHistory defaults to 50 rows if no limit is given — fine for
+  // a quick glance, but silently wrong for exporting a real day's numbers
+  // once a branch is doing 50+ orders a day, which both branches routinely
+  // are. 5000 comfortably covers any realistic range someone would pick
+  // here; the truncation check below means this is provably visible if
+  // it's ever still not enough, rather than a return to silent data loss.
+  const HISTORY_FETCH_LIMIT = 5000
 
   async function search() {
     setLoading(true)
     const effectiveFrom = earliestSelectable && from < earliestSelectable ? earliestSelectable : from
-    const data = await fetchOrderHistory(nepalDayStartUTC(effectiveFrom), nepalDayEndUTC(to))
+    const data = await fetchOrderHistory(nepalDayStartUTC(effectiveFrom), nepalDayEndUTC(to), HISTORY_FETCH_LIMIT)
     setRows(data)
+    setPossiblyTruncated(data.length >= HISTORY_FETCH_LIMIT)
     setLoading(false)
   }
 
@@ -796,9 +806,14 @@ function OrderHistoryCard({ onPrint }: { onPrint: (row: OrderHistoryRow) => void
         ))}
       </div>
       <div className="flex justify-between text-sm pt-1 border-t border-ink/10">
-        <span className="font-semibold">{(rows ?? []).length} orders (latest 50 max)</span>
+        <span className="font-semibold">{(rows ?? []).length} order{(rows ?? []).length === 1 ? '' : 's'}</span>
         <span className="font-ticket font-bold">Rs. {total}</span>
       </div>
+      {possiblyTruncated && (
+        <p className="text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2 mt-2">
+          This range has {HISTORY_FETCH_LIMIT}+ orders — narrow the dates to make sure nothing's being cut off the export.
+        </p>
+      )}
     </>
   )
 
