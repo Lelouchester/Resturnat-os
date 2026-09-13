@@ -53,7 +53,11 @@ export function useItemUsageData(
           .eq('kind', 'inventory')
           .neq('purchases.status', 'cancelled')
           .gte('purchases.created_at', from)
-          .lte('purchases.created_at', to),
+          .lte('purchases.created_at', to)
+          // See useRevenueVsPurchasesTrend.ts for why this matters — an
+          // unbounded query silently truncates against Supabase's default
+          // row cap on a wide enough range, with no error at all.
+          .limit(20000),
         allMenuIds.length > 0
           ? supabase
               .from('order_items')
@@ -63,6 +67,7 @@ export function useItemUsageData(
               .eq('orders.status', 'paid')
               .gte('orders.closed_at', from)
               .lte('orders.closed_at', to)
+              .limit(20000)
           : Promise.resolve({ data: [], error: null }),
       ])
 

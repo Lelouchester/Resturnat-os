@@ -48,6 +48,10 @@ export function usePurchaseTrendsData(range: { from: string; to: string }) {
         .neq('purchases.status', 'cancelled')
         .gte('purchases.created_at', from)
         .lte('purchases.created_at', to)
+        // See useRevenueVsPurchasesTrend.ts for why this matters — an
+        // unbounded query silently truncates against Supabase's default
+        // row cap on a wide enough range, with no error at all.
+        .limit(20000)
 
       if (error) console.error('[usePurchaseTrendsData] query failed', error)
       if (cancelled) return

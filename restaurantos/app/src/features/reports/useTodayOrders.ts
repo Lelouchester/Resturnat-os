@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../shared/lib/supabase'
+import { nepalToday, nepalDayStartUTC } from '../../shared/lib/nepalDate'
 
 export interface TodayOrderRow {
   id: string
@@ -25,8 +26,7 @@ export function useTodayOrders() {
 
   async function reload() {
     setLoading(true)
-    const dayStart = new Date()
-    dayStart.setHours(0, 0, 0, 0)
+    const dayStart = nepalDayStartUTC(nepalToday())
 
     const { data, error } = await supabase
       .from('orders')
@@ -34,8 +34,9 @@ export function useTodayOrders() {
         'id, closed_at, total, activity_note, billing_remark, restaurant_tables ( label ), customers ( name ), order_items ( quantity, custom_name, status, menu_items ( name ) )'
       )
       .eq('status', 'paid')
-      .gte('closed_at', dayStart.toISOString())
+      .gte('closed_at', dayStart)
       .order('closed_at', { ascending: false })
+      .limit(2000)
 
     if (error) console.error('[useTodayOrders] query failed', error)
 

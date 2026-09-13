@@ -3,6 +3,7 @@ import { supabase } from '../../shared/lib/supabase'
 import { useAuthStore, currentBranchId } from '../auth/authStore'
 import { useTablesStore } from '../tables/tablesStore'
 import { useAccountsStore } from '../accounts/accountsStore'
+import { nepalToday, nepalDayStartUTC } from '../../shared/lib/nepalDate'
 import { useMenuStore } from '../menu/menuStore'
 import { useInventoryStore } from '../inventory/inventoryStore'
 import type { CartLine, LiveOrder, OrderItemRow, OrderItemStatus } from './types'
@@ -755,11 +756,15 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
   // as a general "undo any order" tool — see the migration for the exact
   // rules it enforces (today only, paid orders only, not a merged bill).
   cancelPaidOrder: async (orderId) => {
-    const localDayStart = new Date()
-    localDayStart.setHours(0, 0, 0, 0)
+    // Nepal-anchored, not the device's own clock/timezone — this used to
+    // claim consistency with Today's Snapshot, but that boundary was
+    // fixed to be Nepal-anchored (see shared/lib/nepalDate.ts) without
+    // this one being updated to match, which would let the two "today"
+    // definitions quietly disagree near midnight.
+    const localDayStart = nepalDayStartUTC(nepalToday())
     const { error } = await supabase.rpc('cancel_order', {
       p_order_id: orderId,
-      p_local_day_start: localDayStart.toISOString(),
+      p_local_day_start: localDayStart,
     })
     if (error) {
       console.error('[ordersStore] cancelPaidOrder failed', error)

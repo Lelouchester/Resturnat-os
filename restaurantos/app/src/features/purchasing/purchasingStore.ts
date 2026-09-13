@@ -3,6 +3,7 @@ import { supabase } from '../../shared/lib/supabase'
 import { currentBranchId } from '../auth/authStore'
 import { useAccountsStore } from '../accounts/accountsStore'
 import { useInventoryStore } from '../inventory/inventoryStore'
+import { nepalToday, nepalDayStartUTC } from '../../shared/lib/nepalDate'
 import type { Supplier, PurchaseRecord, PurchaseLine, PurchaseCategory } from './types'
 
 /**
@@ -59,7 +60,7 @@ function mapPurchase(row: any, paidAmounts: Record<string, number>): PurchaseRec
 async function loadPurchasing(): Promise<{ suppliers: Supplier[]; purchases: PurchaseRecord[] }> {
   const [{ data: suppliers, error: supErr }, { data: purchases, error: purErr }, { data: payments, error: payErr }] = await Promise.all([
     supabase.from('suppliers').select('*').eq('branch_id', currentBranchId()),
-    supabase.from('purchases').select('*, purchase_lines ( * )').eq('branch_id', currentBranchId()).order('created_at', { ascending: false }),
+    supabase.from('purchases').select('*, purchase_lines ( * )').eq('branch_id', currentBranchId()).order('created_at', { ascending: false }).limit(20000),
     supabase
       .from('purchase_payments')
       .select('purchase_id, amount, payment_methods ( key ), purchases!inner ( branch_id )')
@@ -227,14 +228,15 @@ export const usePurchasingStore = create<PurchasingState>((set, get) => ({
   // Reverses a purchase in one atomic server-side step (stock, the money
   // paid out, and any supplier shortfall) — only allowed for a purchase from
   // today, enforced both here (button hidden below) and again in the
-  // database function itself. `p_local_day_start` is midnight in the
-  // device's own local time, the same boundary Today's Snapshot uses.
+  // database function itself. `p_local_day_start` is Nepal's midnight —
+  // not the device's own clock/timezone, which used to be the case here
+  // and could quietly disagree with Today's Snapshot (now Nepal-anchored,
+  // see shared/lib/nepalDate.ts) near midnight.
   cancelPurchase: async (purchaseId) => {
-    const localDayStart = new Date()
-    localDayStart.setHours(0, 0, 0, 0)
+    const localDayStart = nepalDayStartUTC(nepalToday())
     const { error } = await supabase.rpc('cancel_purchase', {
       p_purchase_id: purchaseId,
-      p_local_day_start: localDayStart.toISOString(),
+      p_local_day_start: localDayStart,
     })
     if (error) {
       console.error('[purchasingStore] cancelPurchase failed', error)

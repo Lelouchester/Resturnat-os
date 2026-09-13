@@ -55,13 +55,23 @@ export function useRevenueVsPurchasesTrend(range: { from: string; to: string }) 
           // in Reports for the exact same range.
           .eq('is_staff_order', false)
           .gte('closed_at', from)
-          .lte('closed_at', to),
+          .lte('closed_at', to)
+          .order('closed_at', { ascending: true })
+          // Without an explicit limit, this relies entirely on
+          // Supabase/PostgREST's own default row cap — a busy branch can
+          // clear 60+ orders a day, so 30-90 day ranges can genuinely
+          // exceed a default 1000-row cap. That's exactly what caused a
+          // contiguous block of days to read as near-zero revenue: the
+          // query was silently truncated with no error and no warning.
+          // 20000 comfortably covers any realistic range for either cafe.
+          .limit(20000),
         supabase
           .from('purchase_lines')
           .select('quantity, unit_cost, purchases!inner ( created_at, status )')
           .neq('purchases.status', 'cancelled')
           .gte('purchases.created_at', from)
-          .lte('purchases.created_at', to),
+          .lte('purchases.created_at', to)
+          .limit(20000),
       ])
 
       if (ordersErr) console.error('[useRevenueVsPurchasesTrend] orders query failed', ordersErr)

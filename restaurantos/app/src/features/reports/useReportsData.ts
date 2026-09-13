@@ -90,6 +90,13 @@ async function loadReports(range: ReportRange, customFrom?: string, customTo?: s
     .eq('is_staff_order', false)
     .gte('closed_at', from)
     .lte('closed_at', to)
+    .order('closed_at', { ascending: true })
+    // Without this, the query relies entirely on Supabase's own default
+    // row cap — a busy branch can clear 60+ orders a day, so a 30-day
+    // range can genuinely exceed a default 1000-row cap, silently
+    // truncating a whole block of days with no error at all. 20000
+    // comfortably covers any realistic range for either cafe.
+    .limit(20000)
 
   if (error) {
     console.error('[useReportsData] query failed', error)
