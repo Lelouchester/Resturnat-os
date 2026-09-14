@@ -5,24 +5,22 @@ import { NotificationBell } from './NotificationBell'
 import { ShortcutsHelpModal } from './ShortcutsHelpModal'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 import { useAuthStore } from '../../features/auth/authStore'
+import type { FeatureKey } from '../../features/staff/types'
 
-const NAV = [
-  { to: '/tables', label: 'Floor', icon: LayoutGrid },
-  { to: '/orders', label: 'Orders', icon: ClipboardList },
-  { to: '/kitchen', label: 'Kitchen', icon: ChefHat },
-  { to: '/billing', label: 'Billing', icon: Receipt },
-  { to: '/accounts', label: 'Accounts', icon: Clock },
-  { to: '/menu', label: 'Menu', icon: BookOpen },
-  { to: '/inventory', label: 'Inventory', icon: Boxes },
-  { to: '/purchasing', label: 'Purchasing', icon: Truck },
-  { to: '/customers', label: 'Customers', icon: Users },
-  { to: '/staff', label: 'Staff', icon: UserCog },
-  { to: '/reports', label: 'Reports', icon: BarChart3 },
-  // financialsOnly items are filtered out below for anyone without that
-  // permission — this is UX only (so it's not a dead end to tap), the real
-  // enforcement is the RLS policy on bank_ledger_entries itself.
-  { to: '/bank', label: 'Bank', icon: Landmark, financialsOnly: true },
-  { to: '/settings', label: 'Settings', icon: Settings },
+const NAV: { to: string; label: string; icon: typeof LayoutGrid; feature: FeatureKey }[] = [
+  { to: '/tables', label: 'Floor', icon: LayoutGrid, feature: 'tables' },
+  { to: '/orders', label: 'Orders', icon: ClipboardList, feature: 'orders' },
+  { to: '/kitchen', label: 'Kitchen', icon: ChefHat, feature: 'kitchen' },
+  { to: '/billing', label: 'Billing', icon: Receipt, feature: 'billing' },
+  { to: '/accounts', label: 'Accounts', icon: Clock, feature: 'shifts' },
+  { to: '/menu', label: 'Menu', icon: BookOpen, feature: 'menu' },
+  { to: '/inventory', label: 'Inventory', icon: Boxes, feature: 'inventory' },
+  { to: '/purchasing', label: 'Purchasing', icon: Truck, feature: 'purchasing' },
+  { to: '/customers', label: 'Customers', icon: Users, feature: 'customers' },
+  { to: '/staff', label: 'Staff', icon: UserCog, feature: 'staff' },
+  { to: '/reports', label: 'Reports', icon: BarChart3, feature: 'reports' },
+  { to: '/bank', label: 'Bank', icon: Landmark, feature: 'financials' },
+  { to: '/settings', label: 'Settings', icon: Settings, feature: 'settings' },
 ]
 
 // A phone screen can comfortably hold ~4 bottom-nav items before it stops
@@ -34,8 +32,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [moreOpen, setMoreOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const location = useLocation()
-  const canSeeFinancials = useAuthStore((s) => s.staff?.permissions.financials ?? false)
-  const nav = NAV.filter((item) => !item.financialsOnly || canSeeFinancials)
+  const staff = useAuthStore((s) => s.staff)
+  // Matches the actual enforcement in RequirePermission — admins always
+  // see everything, everyone else only sees what they can actually use.
+  // Before this, every nav item showed to everyone regardless of their
+  // permissions (except Bank), which meant tapping a link could dead-end
+  // straight into a redirect for something that looked like a real option.
+  const nav = NAV.filter((item) => staff?.role === 'admin' || (staff?.permissions[item.feature] ?? false))
   const primary = nav.slice(0, PRIMARY_COUNT)
   const overflow = nav.slice(PRIMARY_COUNT)
   const overflowActive = overflow.some((item) => item.to === location.pathname)

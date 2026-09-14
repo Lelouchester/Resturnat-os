@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Suspense, lazy, useEffect, type ReactNode } from 'react'
 import { useAuthStore } from './features/auth/authStore'
+import { RequirePermission } from './features/auth/RequirePermission'
 import { AppShell } from './shared/ui/AppShell'
 import { ErrorBoundary } from './shared/ui/ErrorBoundary'
 import { useSettingsStore } from './features/settings/settingsStore'
@@ -115,28 +116,30 @@ function App() {
             <RouteErrorBoundary>
             <Routes>
               <Route path="/" element={<Navigate to="/tables" replace />} />
-              <Route path="/tables" element={<TablesPage />} />
-              <Route path="/orders" element={<OrdersPage />} />
-              <Route path="/kitchen" element={<KitchenPage />} />
-              <Route path="/billing" element={<BillingPage />} />
-              <Route path="/accounts" element={<AccountsPage />} />
-              <Route path="/menu" element={<MenuPage />} />
-              <Route path="/inventory" element={<InventoryPage />} />
-              <Route path="/purchasing" element={<PurchasingPage />} />
-              <Route path="/customers" element={<CustomersPage />} />
+              <Route path="/tables" element={<RequirePermission feature="tables"><TablesPage /></RequirePermission>} />
+              <Route path="/orders" element={<RequirePermission feature="orders"><OrdersPage /></RequirePermission>} />
+              <Route path="/kitchen" element={<RequirePermission feature="kitchen"><KitchenPage /></RequirePermission>} />
+              <Route path="/billing" element={<RequirePermission feature="billing"><BillingPage /></RequirePermission>} />
+              <Route path="/accounts" element={<RequirePermission feature="shifts"><AccountsPage /></RequirePermission>} />
+              <Route path="/menu" element={<RequirePermission feature="menu"><MenuPage /></RequirePermission>} />
+              <Route path="/inventory" element={<RequirePermission feature="inventory"><InventoryPage /></RequirePermission>} />
+              <Route path="/purchasing" element={<RequirePermission feature="purchasing"><PurchasingPage /></RequirePermission>} />
+              <Route path="/customers" element={<RequirePermission feature="customers"><CustomersPage /></RequirePermission>} />
               <Route
                 path="/reports"
                 element={
-                  <ErrorBoundary label="Reports">
-                    <Suspense fallback={<div className="p-6 text-sm text-ink/40">Loading reports…</div>}>
-                      <ReportsPage />
-                    </Suspense>
-                  </ErrorBoundary>
+                  <RequirePermission feature="reports">
+                    <ErrorBoundary label="Reports">
+                      <Suspense fallback={<div className="p-6 text-sm text-ink/40">Loading reports…</div>}>
+                        <ReportsPage />
+                      </Suspense>
+                    </ErrorBoundary>
+                  </RequirePermission>
                 }
               />
-              <Route path="/staff" element={<StaffPage />} />
-              <Route path="/bank" element={<BankPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/staff" element={<RequirePermission feature="staff"><StaffPage /></RequirePermission>} />
+              <Route path="/bank" element={<RequirePermission feature="financials"><BankPage /></RequirePermission>} />
+              <Route path="/settings" element={<RequirePermission feature="settings"><SettingsPage /></RequirePermission>} />
               <Route path="/login" element={<LoginPage />} />
             </Routes>
             </RouteErrorBoundary>

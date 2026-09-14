@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../shared/lib/supabase'
-import { nepalDateKey, nepalDateKeyToLabel, nepalWeekStartKey, nepalDayStartUTC, nepalDayEndUTC } from '../../shared/lib/nepalDate'
+import { currentBranchId } from '../auth/authStore'
+import { nepalDateKeyToLabel } from '../../shared/lib/nepalDate'
 
 export type GlanceRange = '7 days' | '30 days' | '90 days' | 'custom'
 
@@ -10,119 +11,59 @@ export interface GlanceTrendPoint {
   purchases: number
 }
 
-// A Nepal-anchored day key, or that week's Sunday, still as a key — never
-// a display string. Bucketing by a device-local display label (the old
-// approach here) is exactly what caused the recurring "trend line is
-// broken" reports: a transaction between midnight and 5:45am Nepal time
-// lands on a different calendar day depending on the viewing device's own
-// clock/timezone, so two people looking at the same range could silently
-// get different buckets. See shared/lib/nepalDate.ts.
-function bucketKey(date: Date, weekly: boolean): string {
-  const dayKey = nepalDateKey(date)
-  return weekly ? nepalWeekStartKey(dayKey) : dayKey
-}
+const EMPTY = { points: [] as GlanceTrendPoint[], totalRevenue: 0, totalPurchases: 0 }
 
 /**
- * The "where are we headed" glance — revenue and purchases side by side
- * over a quick default range, so it's visible the moment Reports opens
- * instead of needing a date range picked first every time.
+ * Does the day-by-day addition entirely in the database (see migration
+ * 017, daily_revenue_vs_purchases) instead of pulling every individual
+ * order and purchase-line row to the browser and adding them up in
+ * JavaScript. That older approach is what caused the trend line to show
+ * zero for a stretch of recent dates: a busy month is easily 1500-2000+
+ * individual order rows, comfortably over Supabase's own server-side cap
+ * on how many rows a single query can return — a cap that cannot be
+ * overridden by a client-side .limit() call, no matter how high it's
+ * set. This function always returns exactly one row per calendar day in
+ * the range (30, 90, whatever was asked for), never one row per order,
+ * so there's no volume of underlying data that can ever trigger that
+ * failure mode again.
  */
 export function useRevenueVsPurchasesTrend(range: { from: string; to: string }) {
-  const [points, setPoints] = useState<GlanceTrendPoint[]>([])
-  const [totalRevenue, setTotalRevenue] = useState(0)
-  const [totalPurchases, setTotalPurchases] = useState(0)
+  const [data, setData] = useState(EMPTY)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let cancelled = false
+    setLoading(true)
 
-    async function load() {
-      setLoading(true)
-      const from = nepalDayStartUTC(range.from)
-      const to = nepalDayEndUTC(range.to)
-      const spanDays = (new Date(range.to).getTime() - new Date(range.from).getTime()) / 86400000
-      const weekly = spanDays > 60
+    supabase
+      .rpc('daily_revenue_vs_purchases', {
+        p_branch_id: currentBranchId(),
+        p_from: range.from,
+        p_to: range.to,
+      })
+      .then(({ data: rows, error }) => {
+        if (cancelled) return
+        if (error) {
+          console.error('[useRevenueVsPurchasesTrend] query failed', error)
+          setData(EMPTY)
+          setLoading(false)
+          return
+        }
+        const points: GlanceTrendPoint[] = (rows ?? []).map((r: any) => ({
+          period: nepalDateKeyToLabel(r.day),
+          revenue: Number(r.revenue),
+          purchases: Number(r.purchases),
+        }))
+        const totalRevenue = points.reduce((s: number, p: GlanceTrendPoint) => s + p.revenue, 0)
+        const totalPurchases = points.reduce((s: number, p: GlanceTrendPoint) => s + p.purchases, 0)
+        setData({ points, totalRevenue, totalPurchases })
+        setLoading(false)
+      })
 
-      const [{ data: orders, error: ordersErr }, { data: lines, error: linesErr }] = await Promise.all([
-        supabase
-          .from('orders')
-          .select('total, closed_at')
-          .eq('status', 'paid')
-          // Staff/no-charge orders (migration 014) carry a real `total` —
-          // that's item cost, not revenue — so they'd otherwise inflate
-          // this figure with money that was never actually collected,
-          // and disagree with the (correctly-filtered) figures elsewhere
-          // in Reports for the exact same range.
-          .eq('is_staff_order', false)
-          .gte('closed_at', from)
-          .lte('closed_at', to)
-          .order('closed_at', { ascending: true })
-          // Without an explicit limit, this relies entirely on
-          // Supabase/PostgREST's own default row cap — a busy branch can
-          // clear 60+ orders a day, so 30-90 day ranges can genuinely
-          // exceed a default 1000-row cap. That's exactly what caused a
-          // contiguous block of days to read as near-zero revenue: the
-          // query was silently truncated with no error and no warning.
-          // 20000 comfortably covers any realistic range for either cafe.
-          .limit(20000),
-        supabase
-          .from('purchase_lines')
-          .select('quantity, unit_cost, purchases!inner ( created_at, status )')
-          .neq('purchases.status', 'cancelled')
-          .gte('purchases.created_at', from)
-          .lte('purchases.created_at', to)
-          .limit(20000),
-      ])
-
-      if (ordersErr) console.error('[useRevenueVsPurchasesTrend] orders query failed', ordersErr)
-      if (linesErr) console.error('[useRevenueVsPurchasesTrend] purchase_lines query failed', linesErr)
-      if (cancelled) return
-
-      const byBucket = new Map<string, { revenue: number; purchases: number; sortKey: number }>()
-      let revSum = 0
-      let purSum = 0
-
-      for (const o of orders ?? []) {
-        const d = new Date((o as any).closed_at)
-        const key = bucketKey(d, weekly)
-        const amt = Number((o as any).total)
-        const cur = byBucket.get(key) ?? { revenue: 0, purchases: 0, sortKey: d.getTime() }
-        cur.revenue += amt
-        byBucket.set(key, cur)
-        revSum += amt
-      }
-
-      for (const l of lines ?? []) {
-        const purchase = (l as any).purchases
-        const d = new Date(purchase.created_at)
-        const key = bucketKey(d, weekly)
-        const amt = Number((l as any).quantity) * Number((l as any).unit_cost)
-        const cur = byBucket.get(key) ?? { revenue: 0, purchases: 0, sortKey: d.getTime() }
-        cur.purchases += amt
-        byBucket.set(key, cur)
-        purSum += amt
-      }
-
-      // Was previously left in whatever order orders/purchases happened to
-      // load in (JS Map preserves insertion order) — meaning the chart's
-      // x-axis could come out scrambled rather than chronological. Sort by
-      // each bucket's actual timestamp, not the display string.
-      const result = Array.from(byBucket.entries())
-        .map(([period, v]) => ({ period, revenue: v.revenue, purchases: v.purchases, sortKey: v.sortKey }))
-        .sort((a, b) => a.sortKey - b.sortKey)
-        .map(({ period, revenue, purchases }) => ({ period: nepalDateKeyToLabel(period), revenue, purchases }))
-
-      setPoints(result)
-      setTotalRevenue(revSum)
-      setTotalPurchases(purSum)
-      setLoading(false)
-    }
-
-    load()
     return () => {
       cancelled = true
     }
   }, [range.from, range.to])
 
-  return { points, totalRevenue, totalPurchases, loading }
+  return { ...data, loading }
 }
