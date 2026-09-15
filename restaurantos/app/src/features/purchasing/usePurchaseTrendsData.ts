@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../shared/lib/supabase'
-import { nepalDateKey, nepalDateKeyToLabel, nepalWeekStartKey, nepalDayStartUTC, nepalDayEndUTC } from '../../shared/lib/nepalDate'
+import { currentBranchId } from '../auth/authStore'
+import { nepalDateKeyToLabel } from '../../shared/lib/nepalDate'
 
 export type TrendRange = '7 days' | '30 days' | '90 days' | 'custom'
 
@@ -14,19 +15,23 @@ export interface PurchaseTrendsData {
 
 const EMPTY: PurchaseTrendsData = { spendTrend: [], topItems: [], bySupplier: [], totalSpend: 0, purchaseCount: 0 }
 
-// Nepal-anchored, never device-local — see shared/lib/nepalDate.ts for why
-// bucketing by a display string (the old approach here) caused this trend
-// to intermittently scramble depending on which device generated it.
-function bucketKey(date: Date, weekly: boolean): string {
-  const dayKey = nepalDateKey(date)
-  return weekly ? nepalWeekStartKey(dayKey) : dayKey
-}
-
 /**
  * Where the money's going and what's actually being bought — spend over
  * time, the items that make up most of the purchasing budget, and which
  * suppliers get the most. Cancelled purchases are excluded throughout,
  * same as the running total on the purchase history list.
+ *
+ * All three totals are computed inside the database (see migration 018)
+ * instead of pulling every individual purchase_line row to the browser
+ * and adding them up in JavaScript. That older approach is what caused
+ * the revenue-vs-purchases trend to show zero for a stretch of recent
+ * dates elsewhere in Reports — a busy range is easily 1000+ individual
+ * rows, over Supabase's own server-side cap on how many rows a single
+ * query can return, a cap no client-side .limit() can override. These
+ * functions always return a small, fixed-shape result (one row per day,
+ * or the top 10 items) no matter how much purchasing history sits
+ * underneath, so there's no data volume that can trigger that failure
+ * mode here.
  */
 export function usePurchaseTrendsData(range: { from: string; to: string }) {
   const [data, setData] = useState<PurchaseTrendsData>(EMPTY)
@@ -34,88 +39,49 @@ export function usePurchaseTrendsData(range: { from: string; to: string }) {
 
   useEffect(() => {
     let cancelled = false
+    setLoading(true)
+    const branchId = currentBranchId()
 
-    async function load() {
-      setLoading(true)
-      const from = nepalDayStartUTC(range.from)
-      const to = nepalDayEndUTC(range.to)
-
-      const { data: lines, error } = await supabase
-        .from('purchase_lines')
-        .select(
-          'description, quantity, unit_cost, inventory_item_id, inventory_items ( name, unit ), purchases!inner ( created_at, status, supplier_id, suppliers ( name ) )'
-        )
-        .neq('purchases.status', 'cancelled')
-        .gte('purchases.created_at', from)
-        .lte('purchases.created_at', to)
-        // See useRevenueVsPurchasesTrend.ts for why this matters — an
-        // unbounded query silently truncates against Supabase's default
-        // row cap on a wide enough range, with no error at all.
-        .limit(20000)
-
-      if (error) console.error('[usePurchaseTrendsData] query failed', error)
+    Promise.all([
+      supabase.rpc('purchase_daily_spend', { p_branch_id: branchId, p_from: range.from, p_to: range.to }),
+      supabase.rpc('purchase_totals_by_item', { p_branch_id: branchId, p_from: range.from, p_to: range.to }),
+      supabase.rpc('purchase_totals_by_supplier', { p_branch_id: branchId, p_from: range.from, p_to: range.to }),
+      // A count-only query never transfers row data regardless of volume —
+      // safe on its own even without the functions above.
+      supabase
+        .from('purchases')
+        .select('id', { count: 'exact', head: true })
+        .eq('branch_id', branchId)
+        .neq('status', 'cancelled')
+        .gte('created_at', `${range.from}T00:00:00+05:45`)
+        .lte('created_at', `${range.to}T23:59:59+05:45`),
+    ]).then(([dailyRes, itemRes, supplierRes, countRes]) => {
       if (cancelled) return
+      if (dailyRes.error) console.error('[usePurchaseTrendsData] daily spend query failed', dailyRes.error)
+      if (itemRes.error) console.error('[usePurchaseTrendsData] by-item query failed', itemRes.error)
+      if (supplierRes.error) console.error('[usePurchaseTrendsData] by-supplier query failed', supplierRes.error)
+      if (countRes.error) console.error('[usePurchaseTrendsData] purchase count query failed', countRes.error)
 
-      // Bucket weekly once the span gets long enough that daily bars would
-      // be too cramped to read — same idea regardless of whether the range
-      // came from a preset button or a manually picked start/end date.
-      const spanDays = (new Date(range.to).getTime() - new Date(range.from).getTime()) / 86400000
-      const weekly = spanDays > 60
-      const trendMap = new Map<string, { spend: number; sortKey: number }>()
-      const itemMap = new Map<string, { name: string; unit?: string; qty: number; spend: number }>()
-      const supplierMap = new Map<string, number>()
-      let totalSpend = 0
+      const spendTrend = (dailyRes.data ?? []).map((r: any) => ({
+        period: nepalDateKeyToLabel(r.day),
+        spend: Number(r.spend),
+      }))
+      const topItems = (itemRes.data ?? []).map((r: any) => ({
+        name: r.name as string,
+        unit: r.unit ?? undefined,
+        qty: Number(r.qty),
+        spend: Number(r.spend),
+      }))
+      const bySupplier = (supplierRes.data ?? []).map((r: any) => ({
+        name: r.name as string,
+        spend: Number(r.spend),
+      }))
+      const totalSpend = spendTrend.reduce((s: number, p: { spend: number }) => s + p.spend, 0)
 
-      for (const l of lines ?? []) {
-        const row = l as any
-        const purchase = row.purchases
-        const lineTotal = Number(row.quantity) * Number(row.unit_cost)
-        totalSpend += lineTotal
-
-        const bucket = bucketKey(new Date(purchase.created_at), weekly)
-        const cur = trendMap.get(bucket) ?? { spend: 0, sortKey: new Date(purchase.created_at).getTime() }
-        cur.spend += lineTotal
-        trendMap.set(bucket, cur)
-
-        const itemKey = row.inventory_item_id ? `inv:${row.inventory_item_id}` : `desc:${row.description.trim().toLowerCase()}`
-        const existing = itemMap.get(itemKey)
-        const name = row.inventory_items?.name ?? row.description
-        const unit = row.inventory_items?.unit
-        if (existing) {
-          existing.qty += Number(row.quantity)
-          existing.spend += lineTotal
-        } else {
-          itemMap.set(itemKey, { name, unit, qty: Number(row.quantity), spend: lineTotal })
-        }
-
-        const supplierName = purchase.suppliers?.name ?? 'One-off'
-        supplierMap.set(supplierName, (supplierMap.get(supplierName) ?? 0) + lineTotal)
-      }
-
-      // Purchase count wants the actual distinct purchases, not lines — do it as
-      // a light second pass keyed by nothing we have here, so just count via a
-      // Set of the purchase's created_at+supplier combo as a stable-enough key.
-      const distinctPurchases = new Set((lines ?? []).map((l: any) => `${l.purchases.created_at}:${l.purchases.supplier_id}`))
-
-      // Was previously left in whatever order lines happened to load in
-      // (JS Map preserves insertion order) — meaning the chart's x-axis
-      // could come out scrambled rather than chronological.
-      const spendTrend = Array.from(trendMap.entries())
-        .map(([period, v]) => ({ period, spend: v.spend, sortKey: v.sortKey }))
-        .sort((a, b) => a.sortKey - b.sortKey)
-        .map(({ period, spend }) => ({ period: nepalDateKeyToLabel(period), spend }))
-      const topItems = Array.from(itemMap.values())
-        .sort((a, b) => b.spend - a.spend)
-        .slice(0, 10)
-      const bySupplier = Array.from(supplierMap.entries())
-        .map(([name, spend]) => ({ name, spend }))
-        .sort((a, b) => b.spend - a.spend)
-
-      setData({ spendTrend, topItems, bySupplier, totalSpend, purchaseCount: distinctPurchases.size })
+      setData({ spendTrend, topItems, bySupplier, totalSpend, purchaseCount: countRes.count ?? 0 })
       setLoading(false)
-    }
+    })
 
-    load()
     return () => {
       cancelled = true
     }

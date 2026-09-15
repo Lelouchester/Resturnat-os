@@ -49,8 +49,9 @@ export function ReceiptView({
           {l.name}
           {l.isComplimentary && ' (comp)'}
         </span>
-        <span className="w-8 text-center">{l.quantity}</span>
-        <span className="w-14 text-right">{l.isComplimentary ? 0 : l.unitPrice * l.quantity}</span>
+        <span className="w-6 text-center">{l.quantity}</span>
+        <span className="w-10 text-right">{l.isComplimentary ? 0 : l.unitPrice}</span>
+        <span className="w-12 text-right">{l.isComplimentary ? 0 : l.unitPrice * l.quantity}</span>
       </div>
     )
   }
@@ -78,8 +79,9 @@ export function ReceiptView({
 
         <div className="flex text-[10px] font-bold mb-1">
           <span className="flex-1">ITEM</span>
-          <span className="w-8 text-center">QTY</span>
-          <span className="w-14 text-right">AMOUNT</span>
+          <span className="w-6 text-center">QTY</span>
+          <span className="w-10 text-right">RATE</span>
+          <span className="w-12 text-right">AMOUNT</span>
         </div>
 
         {showGroups ? (
