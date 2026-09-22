@@ -65,7 +65,7 @@ export function ReportsPage() {
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div>
           <h1 className="font-ticket text-xl font-bold">Reports</h1>
-          <p className="text-sm text-ink/50">{view === 'today' ? "A quick look at today" : view === 'usage' ? 'Purchased vs. sold, for linked items' : view === 'orders' ? "Today's billed orders" : view === 'trends' ? 'Revenue vs. purchases, at a glance' : 'Sales, performance, and business insights'}</p>
+          <p className="text-sm text-ink/50">{view === 'today' ? "A quick look at today" : view === 'usage' ? 'Purchased vs. sold, for linked items' : view === 'orders' ? "Today's billed orders" : view === 'trends' ? 'Sales vs. purchases, at a glance' : 'Sales, performance, and business insights'}</p>
         </div>
         <div className="flex gap-1 bg-surface border border-ink/10 rounded-xl p-1">
           <button

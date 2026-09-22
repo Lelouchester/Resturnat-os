@@ -25,6 +25,7 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
   const canSeeFinancials = useAuthStore((s) => s.staff?.permissions.financials ?? false)
   const removeCustomer = useCustomersStore((s) => s.removeCustomer)
   const cancelPaidOrder = useOrdersStore((s) => s.cancelPaidOrder)
+  const canCancelOrders = useAuthStore((s) => s.staff?.permissions.cancel_orders ?? false)
   const paymentMethods = useSettingsStore((s) => s.paymentMethods)
   const setPendingOrder = useRepeatOrderStore((s) => s.setPending)
   const navigate = useNavigate()
@@ -350,7 +351,7 @@ export function CustomerDetailModal({ customer, onClose }: { customer: Customer;
                         >
                           ↻ Repeat this order
                         </button>
-                        {isToday && (
+                        {isToday && canCancelOrders && (
                           <button
                             onClick={() => handleCancelVisit(v.id)}
                             className="text-[11px] font-semibold text-status-cleaning"

@@ -2,18 +2,11 @@ import { useEffect, useState } from 'react'
 import { Plus, X, ShieldCheck, Pencil, Check, Trash2 } from 'lucide-react'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
-import { useStaffStore } from './staffStore'
-import { FEATURES } from './types'
+import { useStaffStore, type StaffResult } from './staffStore'
+import { useAuthStore } from '../auth/authStore'
+import { LoginActivityView } from './LoginActivityView'
+import { FEATURES, ROLE_LABEL, assignableRoles, canManageRole } from './types'
 import type { StaffRole, StaffMember } from './types'
-
-const ROLES: { key: StaffRole; label: string }[] = [
-  { key: 'admin', label: 'Administrator' },
-  { key: 'manager', label: 'Manager' },
-  { key: 'cashier', label: 'Cashier' },
-  { key: 'waiter', label: 'Waiter' },
-  { key: 'kitchen', label: 'Kitchen' },
-  { key: 'store', label: 'Store' },
-]
 
 export function StaffPage() {
   const staff = useStaffStore((s) => s.staff)
@@ -24,18 +17,33 @@ export function StaffPage() {
   const updateName = useStaffStore((s) => s.updateName)
   const toggleActive = useStaffStore((s) => s.toggleActive)
   const removeStaff = useStaffStore((s) => s.removeStaff)
+  const me = useAuthStore((s) => s.staff)
+  const myRole: StaffRole = me?.role ?? 'waiter'
+  // You can only hand out roles below your own (an administrator can hand out any).
+  const roleOptions = assignableRoles(myRole)
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [staffNotice, setStaffNotice] = useState<string | null>(null)
+
+  function notify(message: string) {
+    setStaffNotice(message)
+    setTimeout(() => setStaffNotice(null), 5000)
+  }
+
+  // Every change reports back: a refusal (someone above your level, a
+  // duplicate email...) is shown, never silently swallowed.
+  async function run(action: Promise<StaffResult>) {
+    const result = await action
+    if (!result.ok) notify(result.error ?? 'That change could not be saved.')
+  }
 
   async function handleRemoveStaff(id: string) {
     const result = await removeStaff(id)
     if (!result.ok) {
-      setStaffNotice(result.error ?? 'Could not remove this person.')
+      notify(result.error ?? 'Could not remove this person.')
     } else if (result.deactivatedInstead) {
-      setStaffNotice('This person has order/shift history, so they were deactivated instead of deleted — their records stay intact.')
+      notify('This person has order/shift history, so they were deactivated instead of deleted — their records stay intact.')
     }
     setRemovingId(null)
-    setTimeout(() => setStaffNotice(null), 5000)
   }
 
   useEffect(() => {
@@ -45,16 +53,23 @@ export function StaffPage() {
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-  const [role, setRole] = useState<StaffRole>('waiter')
+  const [role, setRole] = useState<StaffRole>(roleOptions.includes('waiter') ? 'waiter' : (roleOptions[roleOptions.length - 1] ?? 'waiter'))
+  const [addError, setAddError] = useState<string | null>(null)
   const [permissionsFor, setPermissionsFor] = useState<StaffMember | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
 
-  function handleAdd() {
+  async function handleAdd() {
     if (!name.trim() || !emailValid) return
-    addStaff(name.trim(), email.trim(), role)
+    setAddError(null)
+    const result = await addStaff(name.trim(), email.trim(), role)
+    if (!result.ok) {
+      // Keep the form open with what they typed, and say why.
+      setAddError(result.error ?? 'Could not add this person.')
+      return
+    }
     setName('')
     setEmail('')
     setAdding(false)
@@ -79,7 +94,7 @@ export function StaffPage() {
           <p className="text-sm text-ink/50">{staff.filter((s) => s.isActive).length} active</p>
         </div>
         <button
-          onClick={() => setAdding(true)}
+          onClick={() => { setAddError(null); setAdding(true) }}
           className="flex items-center gap-1.5 rounded-xl bg-ember text-white px-3.5 py-2.5 text-sm font-semibold hover:brightness-95"
         >
           <Plus size={16} /> Add staff
@@ -107,8 +122,8 @@ export function StaffPage() {
               onChange={(e) => setRole(e.target.value as StaffRole)}
               className="w-full mb-4 text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember bg-surface"
             >
-              {ROLES.map((r) => (
-                <option key={r.key} value={r.key}>{r.label}</option>
+              {roleOptions.map((r) => (
+                <option key={r} value={r}>{ROLE_LABEL[r]}</option>
               ))}
             </select>
             <p className="text-xs text-ink/40 mb-4">Starts with the usual access for that role — adjustable per person afterward from "Permissions".</p>
@@ -121,6 +136,7 @@ export function StaffPage() {
               className="w-full mb-1 text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
             />
             <p className="text-xs text-ink/40 mb-4">They'll sign in with this Google account — nothing else to set up on their end.</p>
+            {addError && <p className="text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2 mb-3">{addError}</p>}
             <Button className="w-full" disabled={!name.trim() || !emailValid} onClick={handleAdd}>
               Add staff member
             </Button>
@@ -131,6 +147,11 @@ export function StaffPage() {
       <div className="space-y-2">
         {staff.map((s) => {
           const grantedCount = FEATURES.filter((f) => s.permissions[f.key]).length
+          const isMe = s.id === me?.id
+          // Only people below your level (never yourself) can be changed or
+          // removed — an administrator may manage everyone but themselves.
+          const manageable = !isMe && canManageRole(myRole, s.role)
+          const canRename = manageable || (isMe && myRole === 'admin')
           return (
             <Card key={s.id} className={`p-4 ${s.isActive ? '' : 'opacity-50'}`}>
               <div className="flex items-center justify-between mb-2">
@@ -141,11 +162,11 @@ export function StaffPage() {
                         autoFocus
                         value={renameDraft}
                         onChange={(e) => setRenameDraft(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && renameDraft.trim() && (updateName(s.id, renameDraft.trim()), setRenamingId(null))}
+                        onKeyDown={(e) => e.key === 'Enter' && renameDraft.trim() && (run(updateName(s.id, renameDraft.trim())), setRenamingId(null))}
                         className="text-sm font-semibold border-b border-ember outline-none bg-transparent"
                       />
                       <button
-                        onClick={() => { if (renameDraft.trim()) updateName(s.id, renameDraft.trim()); setRenamingId(null) }}
+                        onClick={() => { if (renameDraft.trim()) run(updateName(s.id, renameDraft.trim())); setRenamingId(null) }}
                         className="text-status-available"
                       >
                         <Check size={14} />
@@ -154,39 +175,48 @@ export function StaffPage() {
                   ) : (
                     <div className="flex items-center gap-1.5">
                       <span className="font-semibold text-sm">{s.name}</span>
-                      <button
-                        onClick={() => { setRenamingId(s.id); setRenameDraft(s.name) }}
-                        className="text-ink/25 hover:text-ink"
-                      >
-                        <Pencil size={11} />
-                      </button>
+                      {isMe && <span className="text-[10px] font-bold rounded-full px-1.5 py-0.5 bg-ink/5 text-ink/50">You</span>}
+                      {canRename && (
+                        <button
+                          onClick={() => { setRenamingId(s.id); setRenameDraft(s.name) }}
+                          className="text-ink/25 hover:text-ink"
+                        >
+                          <Pencil size={11} />
+                        </button>
+                      )}
                     </div>
                   )}
                   <div className="text-xs text-ink/40">{s.email}</div>
                   <select
                     value={s.role}
-                    onChange={(e) => updateRole(s.id, e.target.value as StaffRole)}
-                    className="text-xs text-ink/50 bg-transparent outline-none -ml-0.5"
+                    disabled={!manageable}
+                    onChange={(e) => run(updateRole(s.id, e.target.value as StaffRole))}
+                    className="text-xs text-ink/50 bg-transparent outline-none -ml-0.5 disabled:opacity-100 disabled:appearance-none"
+                    title={manageable ? undefined : isMe ? "You can't change your own role" : 'Above your level'}
                   >
-                    {ROLES.map((r) => (
-                      <option key={r.key} value={r.key}>{r.label}</option>
+                    {(manageable ? roleOptions : [s.role]).map((r) => (
+                      <option key={r} value={r}>{ROLE_LABEL[r]}</option>
                     ))}
                   </select>
                   {!s.hasSignedIn && (
                     <div className="text-[11px] font-semibold text-status-occupied mt-0.5">Waiting for first sign-in</div>
                   )}
                 </div>
-                <button
-                  onClick={() => toggleActive(s.id)}
-                  className={`text-xs font-semibold rounded-full px-3 py-1.5 ${
-                    s.isActive ? 'bg-status-cleaning-bg text-status-cleaning' : 'bg-status-available-bg text-status-available'
-                  }`}
-                >
-                  {s.isActive ? 'Deactivate' : 'Reactivate'}
-                </button>
-                <button onClick={() => setRemovingId(s.id)} className="text-ink/25 hover:text-status-cleaning ml-2" title="Remove">
-                  <Trash2 size={14} />
-                </button>
+                {manageable && (
+                  <>
+                    <button
+                      onClick={() => run(toggleActive(s.id))}
+                      className={`text-xs font-semibold rounded-full px-3 py-1.5 ${
+                        s.isActive ? 'bg-status-cleaning-bg text-status-cleaning' : 'bg-status-available-bg text-status-available'
+                      }`}
+                    >
+                      {s.isActive ? 'Deactivate' : 'Reactivate'}
+                    </button>
+                    <button onClick={() => setRemovingId(s.id)} className="text-ink/25 hover:text-status-cleaning ml-2" title="Remove">
+                      <Trash2 size={14} />
+                    </button>
+                  </>
+                )}
               </div>
               <div className="flex items-center justify-between pt-2 border-t border-ink/5">
                 <div className="flex gap-4 text-xs text-ink/50">
@@ -194,17 +224,29 @@ export function StaffPage() {
                   <span>Shifts: <b className="font-ticket text-ink">{s.shiftsWorked}</b></span>
                   {s.avgPrepMinutes && <span>Avg prep: <b className="font-ticket text-ink">{s.avgPrepMinutes}m</b></span>}
                 </div>
-                <button
-                  onClick={() => setPermissionsFor(s)}
-                  className="flex items-center gap-1 text-xs font-semibold rounded-full border border-ink/10 px-2.5 py-1.5 hover:bg-ink/5"
-                >
-                  <ShieldCheck size={12} /> Permissions ({grantedCount}/{FEATURES.length})
-                </button>
+                {s.role === 'admin' ? (
+                  <span className="flex items-center gap-1 text-xs font-semibold text-ink/40">
+                    <ShieldCheck size={12} /> Full access
+                  </span>
+                ) : manageable ? (
+                  <button
+                    onClick={() => setPermissionsFor(s)}
+                    className="flex items-center gap-1 text-xs font-semibold rounded-full border border-ink/10 px-2.5 py-1.5 hover:bg-ink/5"
+                  >
+                    <ShieldCheck size={12} /> Permissions ({grantedCount}/{FEATURES.length})
+                  </button>
+                ) : (
+                  <span className="flex items-center gap-1 text-xs font-semibold text-ink/40">
+                    <ShieldCheck size={12} /> {grantedCount}/{FEATURES.length} access
+                  </span>
+                )}
               </div>
             </Card>
           )
         })}
       </div>
+
+      {myRole === 'admin' && <LoginActivityView />}
 
       {permissionsFor && (
         <PermissionsModal staff={permissionsFor} onClose={() => setPermissionsFor(null)} />
@@ -241,8 +283,15 @@ export function StaffPage() {
 
 function PermissionsModal({ staff, onClose }: { staff: StaffMember; onClose: () => void }) {
   const setPermission = useStaffStore((s) => s.setPermission)
+  const [error, setError] = useState<string | null>(null)
   // Re-read the live staff record so toggles reflect immediately.
   const live = useStaffStore((s) => s.staff.find((x) => x.id === staff.id)) ?? staff
+
+  async function toggle(feature: (typeof FEATURES)[number]['key'], allowed: boolean) {
+    setError(null)
+    const result = await setPermission(live.id, feature, allowed)
+    if (!result.ok) setError(result.error ?? 'That change could not be saved.')
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
@@ -260,11 +309,12 @@ function PermissionsModal({ staff, onClose }: { staff: StaffMember; onClose: () 
               <span className="text-sm font-medium">{f.label}</span>
               <Toggle
                 checked={live.permissions[f.key]}
-                onChange={(v) => setPermission(live.id, f.key, v)}
+                onChange={(v) => toggle(f.key, v)}
               />
             </div>
           ))}
         </div>
+        {error && <p className="text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2 mt-3">{error}</p>}
 
         <Button className="w-full mt-5" onClick={onClose}>Done</Button>
       </div>

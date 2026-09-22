@@ -36,7 +36,7 @@ export function useShiftLedger(shiftId: string | undefined, openedAt: string | u
         .select('amount, reason, order_id, purchase_id, accounts!inner ( branch_id, payment_methods ( key ) )')
         .eq('accounts.branch_id', currentBranchId())
         .gte('created_at', openedAt),
-      supabase.from('orders').select('total').eq('shift_id', shiftId).eq('status', 'paid').eq('is_staff_order', false),
+      supabase.from('orders').select('total').eq('shift_id', shiftId).eq('status', 'paid').eq('is_staff_order', false).is('merged_into_order_id', null),
     ])
 
     if (error) console.error('[useShiftLedger] ledger query failed', error)
@@ -114,67 +114,103 @@ export interface OrderHistoryRow {
   taxAmount: number
   tipAmount: number
   total: number
+  isStaffOrder: boolean // staff/no-charge table — recorded, but never counted as sales
   paidByMethod: Record<string, number> // e.g. {cash: 500, esewa: 200} — empty means fully due, unpaid
   paymentSummary: string // "Cash: 500, eSewa: 200" or "Due" for display
 }
 
-// Completed (paid) orders in a date range, newest first, for the Order
-// History list, CSV export, and reprinting a past receipt — capped at
-// `limit` (default 50).
-export async function fetchOrderHistory(fromISO: string, toISO: string, limit = 50): Promise<OrderHistoryRow[]> {
-  const { data, error } = await supabase
-    .from('orders')
-    .select(
-      `id, closed_at, subtotal, discount_amount, service_charge, tax_amount, tip_amount, total,
+// Rows are fetched in pages so a wide date range is never silently cut off
+// by the API's per-request row cap (Supabase returns at most ~1000 rows no
+// matter what `.limit()` asks for). Anything smaller than the cap works the
+// same as before; a big range simply takes a few more round trips.
+const HISTORY_PAGE_SIZE = 500
+
+const ORDER_HISTORY_SELECT = `id, closed_at, subtotal, discount_amount, service_charge, tax_amount, tip_amount, total, is_staff_order,
        restaurant_tables ( label ), customers ( name ),
        order_items ( quantity, unit_price, custom_name, is_complimentary, status, menu_items ( name ) ),
        payments ( amount, payment_methods ( key, label ) )`
-    )
-    .eq('status', 'paid')
-    .gte('closed_at', fromISO)
-    .lte('closed_at', toISO)
-    .order('closed_at', { ascending: false })
-    .limit(limit)
 
-  if (error) {
+function mapOrderHistoryRow(o: any): OrderHistoryRow {
+  const activeItems = (o.order_items ?? []).filter((i: any) => i.status !== 'void')
+  const paidByMethod: Record<string, number> = {}
+  for (const p of o.payments ?? []) {
+    const label = p.payment_methods?.label ?? p.payment_methods?.key ?? 'Other'
+    paidByMethod[label] = (paidByMethod[label] ?? 0) + Number(p.amount)
+  }
+  const isStaffOrder = !!o.is_staff_order
+  const paidTotal = Object.values(paidByMethod).reduce((s, v) => s + v, 0)
+  const paymentSummary = isStaffOrder
+    ? 'Staff order (no charge)'
+    : Object.keys(paidByMethod).length === 0
+      ? 'Due (unpaid)'
+      : Object.entries(paidByMethod)
+          .map(([label, amt]) => `${label}: ${amt}`)
+          .join(', ') + (paidTotal < Number(o.total) ? ' (partial, rest due)' : '')
+
+  return {
+    id: o.id,
+    tableLabel: o.restaurant_tables?.label ?? '—',
+    customerName: o.customers?.name ?? 'Walk-in',
+    closedAt: o.closed_at,
+    itemsSummary: activeItems.map((i: any) => `${i.quantity}x ${i.custom_name ?? i.menu_items?.name ?? 'Item'}`).join(', '),
+    lines: activeItems.map((i: any) => ({
+      name: i.custom_name ?? i.menu_items?.name ?? 'Item',
+      quantity: i.quantity,
+      unitPrice: i.is_complimentary ? 0 : Number(i.unit_price),
+    })),
+    subtotal: Number(o.subtotal) || 0,
+    discountAmount: Number(o.discount_amount) || 0,
+    serviceCharge: Number(o.service_charge) || 0,
+    taxAmount: Number(o.tax_amount) || 0,
+    tipAmount: Number(o.tip_amount) || 0,
+    total: Number(o.total) || 0,
+    isStaffOrder,
+    paidByMethod,
+    paymentSummary,
+  }
+}
+
+// Completed (paid) orders in a date range, newest first, for the Order
+// History list, CSV export, and reprinting a past receipt.
+//
+// Returns BOTH normal sales and staff/no-charge orders — each row carries
+// `isStaffOrder`, and callers must keep the two apart (sales totals never
+// include staff orders). Orders that were merged into another table's bill
+// are left out: they're a Rs. 0 shell, and the surviving order carries the
+// whole bill.
+//
+// Throws on a failed query, so a caller that must not proceed with an
+// empty result (the end-of-day backup) can tell "no orders" from "the
+// request failed".
+export async function fetchOrderHistoryOrThrow(fromISO: string, toISO: string, limit = 50): Promise<OrderHistoryRow[]> {
+  const collected: any[] = []
+  while (collected.length < limit) {
+    const start = collected.length
+    const end = Math.min(start + HISTORY_PAGE_SIZE, limit) - 1
+    const { data, error } = await supabase
+      .from('orders')
+      .select(ORDER_HISTORY_SELECT)
+      .eq('status', 'paid')
+      .is('merged_into_order_id', null)
+      .gte('closed_at', fromISO)
+      .lte('closed_at', toISO)
+      .order('closed_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(start, end)
+    if (error) throw error
+    const page = data ?? []
+    if (page.length === 0) break
+    collected.push(...page)
+  }
+  return collected.map(mapOrderHistoryRow)
+}
+
+// Forgiving wrapper for screens that just want to show a list.
+export async function fetchOrderHistory(fromISO: string, toISO: string, limit = 50): Promise<OrderHistoryRow[]> {
+  try {
+    return await fetchOrderHistoryOrThrow(fromISO, toISO, limit)
+  } catch (error) {
     console.error('[fetchOrderHistory] query failed', error)
     return []
   }
-
-  return (data ?? []).map((o: any) => {
-    const activeItems = (o.order_items ?? []).filter((i: any) => i.status !== 'void')
-    const paidByMethod: Record<string, number> = {}
-    for (const p of o.payments ?? []) {
-      const label = p.payment_methods?.label ?? p.payment_methods?.key ?? 'Other'
-      paidByMethod[label] = (paidByMethod[label] ?? 0) + Number(p.amount)
-    }
-    const paidTotal = Object.values(paidByMethod).reduce((s, v) => s + v, 0)
-    const paymentSummary =
-      Object.keys(paidByMethod).length === 0
-        ? 'Due (unpaid)'
-        : Object.entries(paidByMethod)
-            .map(([label, amt]) => `${label}: ${amt}`)
-            .join(', ') + (paidTotal < Number(o.total) ? ' (partial, rest due)' : '')
-
-    return {
-      id: o.id,
-      tableLabel: o.restaurant_tables?.label ?? '—',
-      customerName: o.customers?.name ?? 'Walk-in',
-      closedAt: o.closed_at,
-      itemsSummary: activeItems.map((i: any) => `${i.quantity}x ${i.custom_name ?? i.menu_items?.name ?? 'Item'}`).join(', '),
-      lines: activeItems.map((i: any) => ({
-        name: i.custom_name ?? i.menu_items?.name ?? 'Item',
-        quantity: i.quantity,
-        unitPrice: i.is_complimentary ? 0 : Number(i.unit_price),
-      })),
-      subtotal: Number(o.subtotal) || 0,
-      discountAmount: Number(o.discount_amount) || 0,
-      serviceCharge: Number(o.service_charge) || 0,
-      taxAmount: Number(o.tax_amount) || 0,
-      tipAmount: Number(o.tip_amount) || 0,
-      total: Number(o.total) || 0,
-      paidByMethod,
-      paymentSummary,
-    }
-  })
 }

@@ -2,7 +2,10 @@ import { Navigate } from 'react-router-dom'
 import { useAuthStore } from './authStore'
 import { FEATURES, type FeatureKey, type StaffMember } from '../staff/types'
 
-const FEATURE_TO_ROUTE: Record<FeatureKey, string> = {
+// Only page-level features have a route. 'cancel_orders' and
+// 'adjust_balances' are ACTIONS inside pages (checked where the button is),
+// so they deliberately have none.
+const FEATURE_TO_ROUTE: Partial<Record<FeatureKey, string>> = {
   tables: '/tables',
   orders: '/orders',
   kitchen: '/kitchen',
@@ -27,7 +30,8 @@ function firstAllowedRoute(staff: StaffMember | null): string | null {
   if (!staff) return null
   if (staff.role === 'admin') return '/tables'
   for (const f of FEATURES) {
-    if (staff.permissions[f.key]) return FEATURE_TO_ROUTE[f.key]
+    const route = FEATURE_TO_ROUTE[f.key]
+    if (route && staff.permissions[f.key]) return route
   }
   return null
 }

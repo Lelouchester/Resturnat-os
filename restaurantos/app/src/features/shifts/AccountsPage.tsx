@@ -8,7 +8,7 @@ import { useSettingsStore, type PaymentMethodConfig } from '../settings/settings
 import { useAccountsStore } from '../accounts/accountsStore'
 import { nepalToday, nepalDaysAgo, nepalDayStartUTC, nepalDayEndUTC } from '../../shared/lib/nepalDate'
 import { ArrowRightLeft, ShieldAlert, Pencil } from 'lucide-react'
-import { useShiftLedger, fetchOrderHistory, type OrderHistoryRow } from './useShiftSales'
+import { useShiftLedger, fetchOrderHistoryOrThrow, type OrderHistoryRow } from './useShiftSales'
 import { usePurchasingStore } from '../purchasing/purchasingStore'
 import { useCustomersStore } from '../customers/customersStore'
 import { useInventoryStore } from '../inventory/inventoryStore'
@@ -110,10 +110,22 @@ export function AccountsPage() {
     paymentMethods.forEach((m) => (closingBalances[m.key] = Number(counted[m.key]) || 0))
 
     setBackingUp(true)
-    const backup = await buildDailyBackup(shift, byMethod, closingBalances)
-    downloadBackupJson(backup)
+    let backup: Awaited<ReturnType<typeof buildDailyBackup>> | null = null
+    try {
+      backup = await buildDailyBackup(shift, byMethod, closingBalances)
+    } catch (err) {
+      console.error('[handleEndShift] backup failed', err)
+      setBackingUp(false)
+      const closeAnyway = window.confirm(
+        "The end-of-day backup file couldn't be prepared (usually a connection problem). Close the day anyway, WITHOUT a backup file?"
+      )
+      if (!closeAnyway) return
+    }
     setBackingUp(false)
-    setLastBackup(backup)
+    if (backup) {
+      downloadBackupJson(backup)
+      setLastBackup(backup)
+    }
 
     const result = await endShift(closingBalances)
     if (!result.ok) {
@@ -124,7 +136,7 @@ export function AccountsPage() {
     setOpening(closingBalances)
     setClosingState(false)
     setCounted({})
-    setToast('Day closed — backup downloaded')
+    setToast(backup ? 'Day closed — backup downloaded' : 'Day closed — no backup file was saved')
     setTimeout(() => setToast(null), 3000)
   }
 
@@ -410,7 +422,12 @@ async function buildDailyBackup(
   const dayStart = nepalDayStartUTC(date)
   const dayEnd = nepalDayEndUTC(date)
 
-  const orders = await fetchOrderHistory(dayStart, dayEnd, 500)
+  // Sales and staff (no-charge) orders are kept in separate lists so the
+  // backup can never be summed into a sales figure by accident — but staff
+  // orders are still in the file, since it's meant to be a complete record.
+  const allOrders = await fetchOrderHistoryOrThrow(dayStart, dayEnd, 5000)
+  const orders = allOrders.filter((o) => !o.isStaffOrder)
+  const staffOrders = allOrders.filter((o) => o.isStaffOrder)
 
   const dayStartMs = new Date(dayStart).getTime()
   const dayEndMs = new Date(dayEnd).getTime()
@@ -439,23 +456,26 @@ async function buildDailyBackup(
     })
 
   return {
+    cafe: useSettingsStore.getState().name || undefined,
     date,
     generatedAt: new Date().toISOString(),
     shift: shift ? { openedBy: shift.openedBy, openedAt: shift.openedAt, opening: shift.opening, closing: closingBalances } : null,
     revenueByMethod: byMethod,
     orders,
+    staffOrders,
     purchases,
     customersWithOutstandingDues: customersWithDues,
     inventoryMovementsToday,
   }
 }
 
-function downloadBackupJson(backup: { date: string }) {
+function downloadBackupJson(backup: { date: string; cafe?: string }) {
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `restaurantos_backup_${backup.date}.json`
+  const cafeSlug = (backup.cafe ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  a.download = `restaurantos_backup_${cafeSlug ? cafeSlug + '_' : ''}${backup.date}.json`
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -499,6 +519,8 @@ function TransfersCard({
   const transfersLoading = useAccountsStore((s) => s.transfersLoading)
   const transferFunds = useAccountsStore((s) => s.transferFunds)
   const adjustBalance = useAccountsStore((s) => s.adjustBalance)
+  // Correcting a balance is a permission of its own (shareholders don't get it by default).
+  const canAdjustBalances = useAuthStore((s) => s.staff?.permissions.adjust_balances ?? false)
   const [adjusting, setAdjusting] = useState<PaymentMethodConfig | null>(null)
   const init = useAccountsStore((s) => s.init)
 
@@ -564,7 +586,9 @@ function TransfersCard({
             <div key={m.key} className="rounded-xl border border-ink/10 p-3">
               <div className="flex items-center justify-between mb-0.5">
                 <div className="text-xs text-ink/50">{m.label}{m.isInternal ? ' (internal)' : ''}</div>
-                <button onClick={() => setAdjusting(m)} className="text-ink/30 hover:text-ink"><Pencil size={12} /></button>
+                {canAdjustBalances && (
+                  <button onClick={() => setAdjusting(m)} className="text-ink/30 hover:text-ink"><Pencil size={12} /></button>
+                )}
               </div>
               <div className="font-ticket text-lg font-bold">Rs. {(balances[m.key] ?? 0).toLocaleString()}</div>
             </div>
@@ -769,23 +793,28 @@ function OrderHistoryCard({ onPrint }: { onPrint: (row: OrderHistoryRow) => void
   const [to, setTo] = useState(nepalToday())
   const [rows, setRows] = useState<OrderHistoryRow[] | null>(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
+  const [showStaff, setShowStaff] = useState(false)
   const [possiblyTruncated, setPossiblyTruncated] = useState(false)
 
-  // fetchOrderHistory defaults to 50 rows if no limit is given — fine for
-  // a quick glance, but silently wrong for exporting a real day's numbers
-  // once a branch is doing 50+ orders a day, which both branches routinely
-  // are. 5000 comfortably covers any realistic range someone would pick
-  // here; the truncation check below means this is provably visible if
-  // it's ever still not enough, rather than a return to silent data loss.
+  // Rows are fetched page by page (see fetchOrderHistoryOrThrow), so this
+  // limit is a real ceiling now rather than something the API could quietly
+  // undercut — if it's ever reached, the warning below is genuinely true.
   const HISTORY_FETCH_LIMIT = 5000
 
   async function search() {
     setLoading(true)
+    setError(null)
     const effectiveFrom = earliestSelectable && from < earliestSelectable ? earliestSelectable : from
-    const data = await fetchOrderHistory(nepalDayStartUTC(effectiveFrom), nepalDayEndUTC(to), HISTORY_FETCH_LIMIT)
-    setRows(data)
-    setPossiblyTruncated(data.length >= HISTORY_FETCH_LIMIT)
+    try {
+      const data = await fetchOrderHistoryOrThrow(nepalDayStartUTC(effectiveFrom), nepalDayEndUTC(to), HISTORY_FETCH_LIMIT)
+      setRows(data)
+      setPossiblyTruncated(data.length >= HISTORY_FETCH_LIMIT)
+    } catch (err) {
+      console.error('[OrderHistoryCard] search failed', err)
+      setError("Couldn't load orders — check your connection and press Search again.")
+    }
     setLoading(false)
   }
 
@@ -796,19 +825,45 @@ function OrderHistoryCard({ onPrint }: { onPrint: (row: OrderHistoryRow) => void
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const total = useMemo(() => (rows ?? []).reduce((s, r) => s + r.total, 0), [rows])
+  // Staff (no-charge) orders are real records but not sales: they're kept
+  // out of the list, the count, the total and the CSV, and shown in their
+  // own collapsed line underneath.
+  const salesRows = useMemo(() => (rows ?? []).filter((r) => !r.isStaffOrder), [rows])
+  const staffRows = useMemo(() => (rows ?? []).filter((r) => r.isStaffOrder), [rows])
+  const total = useMemo(() => salesRows.reduce((s, r) => s + r.total, 0), [salesRows])
+  const staffValue = useMemo(() => staffRows.reduce((s, r) => s + r.total, 0), [staffRows])
+
+  const staffBlock =
+    staffRows.length > 0 ? (
+      <div className="mt-2 rounded-xl bg-ink/[0.03] px-3 py-2">
+        <button onClick={() => setShowStaff((v) => !v)} className="w-full flex items-center justify-between gap-2 text-xs text-ink/50 text-left">
+          <span>
+            {staffRows.length} staff order{staffRows.length === 1 ? '' : 's'} — not counted as sales
+          </span>
+          <span className="font-ticket shrink-0">Rs. {staffValue} at menu price {showStaff ? '▲' : '▼'}</span>
+        </button>
+        {showStaff && (
+          <div className="mt-2 space-y-1.5">
+            {staffRows.map((r) => (
+              <HistoryRow key={r.id} row={r} onPrint={onPrint} />
+            ))}
+          </div>
+        )}
+      </div>
+    ) : null
 
   const listBody = (
     <>
       <div className="max-h-72 overflow-y-auto space-y-1.5 mb-2">
-        {(rows ?? []).map((r) => (
+        {salesRows.map((r) => (
           <HistoryRow key={r.id} row={r} onPrint={onPrint} />
         ))}
       </div>
       <div className="flex justify-between text-sm pt-1 border-t border-ink/10">
-        <span className="font-semibold">{(rows ?? []).length} order{(rows ?? []).length === 1 ? '' : 's'}</span>
+        <span className="font-semibold">{salesRows.length} order{salesRows.length === 1 ? '' : 's'}</span>
         <span className="font-ticket font-bold">Rs. {total}</span>
       </div>
+      {staffBlock}
       {possiblyTruncated && (
         <p className="text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2 mt-2">
           This range has {HISTORY_FETCH_LIMIT}+ orders — narrow the dates to make sure nothing's being cut off the export.
@@ -841,18 +896,20 @@ function OrderHistoryCard({ onPrint }: { onPrint: (row: OrderHistoryRow) => void
             <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="text-sm border border-ink/10 rounded-lg px-2.5 py-1.5 outline-none focus:border-ember" />
           </div>
           <Button variant="secondary" onClick={search} disabled={loading}>{loading ? 'Loading…' : 'Search'}</Button>
-          {rows && rows.length > 0 && (
+          {salesRows.length > 0 && (
             <Button
               variant="secondary"
               className="flex items-center gap-1.5"
-              onClick={() => downloadCsv(`orders_${from}_to_${to}.csv`, rows)}
+              onClick={() => downloadCsv(`orders_${from}_to_${to}.csv`, salesRows)}
             >
               <Download size={14} /> Export CSV
             </Button>
           )}
         </div>
 
-        {rows === null || rows.length === 0 ? (
+        {error ? (
+          <p className="text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2">{error}</p>
+        ) : rows === null || rows.length === 0 ? (
           <p className="text-xs text-ink/40">No paid orders in that range.</p>
         ) : (
           listBody
@@ -871,13 +928,14 @@ function OrderHistoryCard({ onPrint }: { onPrint: (row: OrderHistoryRow) => void
             </div>
             <div className="overflow-y-auto flex-1">
               <div className="space-y-1.5 mb-2">
-                {(rows ?? []).map((r) => (
+                {salesRows.map((r) => (
                   <HistoryRow key={r.id} row={r} onPrint={onPrint} />
                 ))}
               </div>
+              {staffBlock}
             </div>
             <div className="flex justify-between text-sm pt-2 border-t border-ink/10 shrink-0">
-              <span className="font-semibold">{(rows ?? []).length} orders</span>
+              <span className="font-semibold">{salesRows.length} order{salesRows.length === 1 ? '' : 's'}</span>
               <span className="font-ticket font-bold">Rs. {total}</span>
             </div>
           </div>
@@ -893,18 +951,18 @@ function HistoryRow({ row, onPrint }: { row: OrderHistoryRow; onPrint: (row: Ord
       <div className="min-w-0">
         <div className="font-semibold">{row.tableLabel} <span className="text-ink/40 font-normal text-xs">{new Date(row.closedAt).toLocaleString()}</span></div>
         <div className="text-xs text-ink/40 truncate">{row.itemsSummary}</div>
-        <div className={`text-[11px] font-semibold ${row.paymentSummary.includes('Due') ? 'text-status-cleaning' : 'text-status-available'}`}>
+        <div className={`text-[11px] font-semibold ${row.isStaffOrder ? 'text-ink/40' : row.paymentSummary.includes('Due') ? 'text-status-cleaning' : 'text-status-available'}`}>
           {row.paymentSummary}
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0 ml-2">
         <span className="font-ticket font-semibold">Rs. {row.total}</span>
-        <button onClick={() => onPrint(row)} className="text-ink/30 hover:text-ink" title="Print receipt">
-          <Printer size={14} />
-        </button>
+        {!row.isStaffOrder && (
+          <button onClick={() => onPrint(row)} className="text-ink/30 hover:text-ink" title="Print receipt">
+            <Printer size={14} />
+          </button>
+        )}
       </div>
     </div>
   )
 }
-
-

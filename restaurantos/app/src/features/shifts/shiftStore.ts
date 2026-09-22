@@ -135,6 +135,14 @@ export const useShiftStore = create<ShiftState>((set, get) => ({
       .select()
       .single()
 
+    // 23505 = the database's "only one open shift per cafe" rule: another
+    // device started the day in the same instant. Show theirs.
+    if (shiftError?.code === '23505') {
+      const { shift, lastClosing } = await loadCurrentShift()
+      set({ shift, lastClosing })
+      return { ok: false, error: 'A shift is already open — refreshing to show it.' }
+    }
+
     if (shiftError || !newShift) {
       console.error('[shiftStore] startShift failed', shiftError)
       return { ok: false, error: shiftError?.message ?? 'Could not start the day — please try again.' }

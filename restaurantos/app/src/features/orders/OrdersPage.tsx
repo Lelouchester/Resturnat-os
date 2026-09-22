@@ -191,9 +191,18 @@ export function OrdersPage() {
           </div>
           <div className="flex items-center gap-3">
             {existingBillable.length > 0 && existingOrder?.status !== 'billing' && (
-              <button onClick={() => setCancelling(true)} className="text-xs font-semibold text-ink/40 hover:text-status-cleaning">
-                Cancel order
-              </button>
+              (existingOrder?.advancePaid ?? 0) > 0 ? (
+                // Cancelling would void the items but leave the money already
+                // collected sitting in Accounts with nothing to attach to — so
+                // an order with an advance has to be finished in Billing.
+                <span className="text-[11px] font-medium text-ink/40 max-w-[9rem] text-right leading-tight">
+                  Rs. {existingOrder?.advancePaid} advance collected — finish in Billing instead of cancelling
+                </span>
+              ) : (
+                <button onClick={() => setCancelling(true)} className="text-xs font-semibold text-ink/40 hover:text-status-cleaning">
+                  Cancel order
+                </button>
+              )
             )}
             {existingBillable.length > 0 && (
               <button

@@ -11,6 +11,7 @@ export interface ItemUsageRow {
   purchasedQty: number
   purchasedSpend: number
   soldTotal: number
+  staffUnits: number // eaten by staff on a no-charge table — real stock used, but not a sale
   soldRevenue: number
   soldBreakdown: { menuItemName: string; qty: number; revenue: number }[]
 }
@@ -61,7 +62,7 @@ export function useItemUsageData(
         allMenuIds.length > 0
           ? supabase
               .from('order_items')
-              .select('menu_item_id, quantity, unit_price, status, orders!inner ( closed_at, status )')
+              .select('menu_item_id, quantity, unit_price, status, orders!inner ( closed_at, status, is_staff_order )')
               .in('menu_item_id', allMenuIds)
               .neq('status', 'void')
               .eq('orders.status', 'paid')
@@ -85,9 +86,16 @@ export function useItemUsageData(
 
       const soldQtyByMenuItem = new Map<string, number>()
       const soldRevenueByMenuItem = new Map<string, number>()
+      const staffQtyByMenuItem = new Map<string, number>()
       for (const oi of orderItems ?? []) {
         const id = (oi as any).menu_item_id
         const qty = Number((oi as any).quantity)
+        // Staff-table items used up real stock, so they're tracked — but as
+        // their own figure, never as units sold or as revenue.
+        if ((oi as any).orders?.is_staff_order) {
+          staffQtyByMenuItem.set(id, (staffQtyByMenuItem.get(id) ?? 0) + qty)
+          continue
+        }
         soldQtyByMenuItem.set(id, (soldQtyByMenuItem.get(id) ?? 0) + qty)
         soldRevenueByMenuItem.set(id, (soldRevenueByMenuItem.get(id) ?? 0) + qty * Number((oi as any).unit_price))
       }
@@ -108,6 +116,7 @@ export function useItemUsageData(
           purchasedQty: purchasedQtyByItem.get(item.id) ?? 0,
           purchasedSpend: purchasedSpendByItem.get(item.id) ?? 0,
           soldTotal: soldBreakdown.reduce((s, b) => s + b.qty, 0),
+          staffUnits: item.linkedMenuItemIds.reduce((s, menuId) => s + (staffQtyByMenuItem.get(menuId) ?? 0), 0),
           soldRevenue: soldBreakdown.reduce((s, b) => s + b.revenue, 0),
           soldBreakdown,
         }

@@ -22,18 +22,42 @@ function saveCafeCode(code: string) {
 }
 
 // Used by the login screen to confirm a typed code resolves to a real cafe
-// *before* sending someone off to Google — this query works even fully
-// signed out, since branches has a deliberately public policy for exactly
-// this lookup (see schema.sql).
+// *before* sending someone off to Google. Works fully signed out, through a
+// narrow database function that hands back only the cafe's id and name (the
+// rest of a cafe's details — phone, address, notes — need a sign-in).
+// An exact match, so a stray % or _ in what someone types can't match a
+// different cafe.
 export async function lookupCafeByCode(code: string): Promise<{ id: string; name: string } | null> {
   const trimmed = code.trim().toLowerCase()
   if (!trimmed) return null
-  const { data, error } = await supabase.from('branches').select('id, name').ilike('code', trimmed).maybeSingle()
+  const { data, error } = await supabase.rpc('lookup_branch_by_code', { p_code: trimmed })
   if (error) {
+    // PGRST202 = "no such function": this app was deployed a moment before
+    // migration 020 was run. Fall back to the older direct lookup so signing
+    // in keeps working in that gap, whichever order the two go out in.
+    if (error.code === 'PGRST202') {
+      const legacy = await supabase.from('branches').select('id, name').ilike('code', trimmed).maybeSingle()
+      return legacy.data ? { id: legacy.data.id, name: legacy.data.name } : null
+    }
     console.error('[authStore] lookupCafeByCode failed', error)
     return null
   }
-  return data
+  const row = Array.isArray(data) ? data[0] : data
+  return row ? { id: row.id, name: row.name } : null
+}
+
+// "Who opened the app, and when" — shown to the administrator only. Several
+// opens close together count as one visit (the database applies a 30-minute
+// window too; this throttle just saves pointless network calls). Never
+// allowed to get in the way of signing in, so any failure is ignored.
+let lastLoginPingAt = 0
+export function recordLoginEvent() {
+  const now = Date.now()
+  if (now - lastLoginPingAt < 5 * 60 * 1000) return
+  lastLoginPingAt = now
+  supabase.rpc('record_login_event').then(({ error }) => {
+    if (error) console.error('[authStore] record_login_event failed', error)
+  })
 }
 
 interface AuthState {
@@ -75,8 +99,11 @@ async function resolveStaffForSession(session: Session): Promise<StaffMember | n
 
   const role = data.role as StaffRole
   const permissions = { ...DEFAULT_PERMISSIONS[role] }
-  for (const p of data.permissions ?? []) {
-    if (p.feature_key in permissions) permissions[p.feature_key as keyof typeof permissions] = p.allowed
+  // Administrators can't be switched off from anything (the database agrees).
+  if (role !== 'admin') {
+    for (const p of data.permissions ?? []) {
+      if (p.feature_key in permissions) permissions[p.feature_key as keyof typeof permissions] = p.allowed
+    }
   }
 
   return {
@@ -107,6 +134,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       }
       const staff = await resolveStaffForSession(session)
       set({ session, staff, status: staff ? 'signed_in' : 'unauthorized' })
+      if (staff) recordLoginEvent()
     })
 
     supabase.auth.onAuthStateChange(async (_event, session) => {
@@ -116,6 +144,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       }
       const staff = await resolveStaffForSession(session)
       set({ session, staff, status: staff ? 'signed_in' : 'unauthorized' })
+      if (staff) recordLoginEvent()
+    })
+
+    // An app left open all day still counts as a fresh visit each time
+    // someone comes back to it.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && useAuthStore.getState().status === 'signed_in') recordLoginEvent()
     })
   },
 

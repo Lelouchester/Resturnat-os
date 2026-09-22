@@ -91,3 +91,13 @@ export function nepalDayStartUTC(dateKey: string): string {
 export function nepalDayEndUTC(dateKey: string): string {
   return new Date(`${dateKey}T23:59:59.999+05:45`).toISOString()
 }
+
+// "Mon, Sep 15" — weekday + short date for a 'YYYY-MM-DD' key, always in
+// Nepal time (anchored to noon so it can't land on the wrong side of a day
+// boundary). For places that list days out in full, where seeing the
+// weekday matters (busy Saturdays vs quiet Tuesdays).
+export function nepalDateKeyToWeekdayLabel(key: string): string {
+  return new Intl.DateTimeFormat(undefined, { timeZone: NEPAL_TZ, weekday: 'short', month: 'short', day: 'numeric' }).format(
+    new Date(`${key}T12:00:00+05:45`)
+  )
+}

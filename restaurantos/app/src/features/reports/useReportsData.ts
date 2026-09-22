@@ -88,6 +88,9 @@ async function loadReports(range: ReportRange, customFrom?: string, customTo?: s
     // figure below (revenue trend, top items, payment split) with money
     // that was never actually collected.
     .eq('is_staff_order', false)
+    // A table merged into another's bill is a Rs. 0 shell that would
+    // otherwise count as an extra order and drag down the average ticket.
+    .is('merged_into_order_id', null)
     .gte('closed_at', from)
     .lte('closed_at', to)
     .order('closed_at', { ascending: true })

@@ -108,6 +108,9 @@ export function ItemUsageReport() {
                     {r.soldTotal} <span className="text-xs font-normal text-ink/50">units</span>
                   </div>
                   <div className="text-xs text-ink/40 mt-0.5">Rs. {Math.round(r.soldRevenue).toLocaleString()} in sales</div>
+                  {r.staffUnits > 0 && (
+                    <div className="text-xs text-ink/40 mt-0.5">+ {r.staffUnits} unit{r.staffUnits === 1 ? '' : 's'} used by staff (not a sale)</div>
+                  )}
                 </div>
               </div>
               {r.soldBreakdown.length > 0 && (

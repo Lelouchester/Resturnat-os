@@ -242,6 +242,19 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       .select()
       .single()
 
+    // 23505 = the database's "one open order per table" rule. It means
+    // another device opened this table's order an instant before this one —
+    // so use theirs, rather than failing or (as before the rule existed)
+    // quietly creating a second bill for the same table.
+    if (error?.code === '23505') {
+      const fresh = await loadOpenOrders()
+      const winner = fresh.find((o) => o.tableId === tableId && (o.status === 'open' || o.status === 'billing'))
+      if (winner) {
+        set({ orders: fresh })
+        return winner.id
+      }
+    }
+
     if (error || !data) {
       console.error('[ordersStore] startOrGetOrder failed', error)
       throw error
@@ -383,6 +396,15 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     // checkout begins; once it's started, it needs to be finished or
     // corrected through Billing itself.
     if (order.status === 'billing') return
+
+    // Money already collected as an advance would be left behind in Accounts
+    // with no order to belong to — so this order has to be finished in
+    // Billing instead. (The Orders screen hides the button too; this is the
+    // backstop for any other caller.)
+    if (order.advancePaid > 0) {
+      console.warn('[ordersStore] cancelOrder refused: an advance payment has been collected on this order')
+      return
+    }
 
     const { data: items, error: fetchErr } = await supabase
       .from('order_items')

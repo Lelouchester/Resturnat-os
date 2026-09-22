@@ -263,7 +263,7 @@ export function TablesPage() {
       })()}
 
       {addingTable && (
-        <AddTableModal onClose={() => setAddingTable(false)} onAdd={(label, seats) => addTable(label, seats)} />
+        <AddTableModal onClose={() => setAddingTable(false)} onAdd={addTable} />
       )}
 
       {collectingId && (() => {
