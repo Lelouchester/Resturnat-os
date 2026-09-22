@@ -1,3 +1,6 @@
+-- OUTDATED: an old copy of the schema without row-level security. It is missing
+-- everything added since migration 003. Kept only for reference — do NOT use it.
+
 -- ============================================================================
 -- RestaurantOS — Core Schema (v2)
 -- Target: Supabase (Postgres)
@@ -323,7 +326,7 @@ create table order_items (
   status order_item_status not null default 'pending',
   is_complimentary boolean default false,
   void_reason text, -- set when status = 'void'
-  kot_printed_at timestamptz, -- set the moment this item is first sent to the kitchen on a KOT print — lets a reprint after new items get added distinguish "already sent" from "just added"
+  kot_printed_at timestamptz, -- set the moment this item is first sent to the kitchen on a KOT print
   created_at timestamptz default now(),
   status_updated_at timestamptz default now()
 );
@@ -337,6 +340,27 @@ create table payments (
   due_settled_at timestamptz,
   created_at timestamptz default now()
 );
+
+-- A payment should only ever land on an order that's still 'open' or
+-- 'billing' — this makes it impossible to add one to an already-closed
+-- order, regardless of a double-tap, a stale screen, or a client bug.
+-- See migration 016.
+create or replace function prevent_payment_on_closed_order() returns trigger as $$
+declare
+  v_status text;
+begin
+  select status into v_status from orders where id = new.order_id;
+  if v_status in ('paid', 'cancelled') then
+    raise exception 'This order is already % — a payment can''t be added to it. If this bill needs correcting, use Cancel/Reverse instead of billing it again.', v_status;
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists trg_prevent_payment_on_closed_order on payments;
+create trigger trg_prevent_payment_on_closed_order
+  before insert on payments
+  for each row execute function prevent_payment_on_closed_order();
 
 alter table ledger_entries add constraint ledger_entries_order_id_fkey foreign key (order_id) references orders(id);
 
@@ -521,35 +545,6 @@ end;
 $$;
 
 -- ----------------------------------------------------------------------------
--- Generic version of the check above, for any feature — see migration 019.
--- Same fallback logic: an explicit permissions override wins if present,
--- otherwise admin/manager roles pass and everyone else doesn't. Defined
--- here (rather than nearer whichever policy first needed it) since a
--- policy's USING/CHECK expression must resolve against functions that
--- already exist earlier in this file.
--- ----------------------------------------------------------------------------
-create or replace function current_staff_has_permission(p_feature text) returns boolean
-language plpgsql stable security definer as $$
-declare
-  v_staff_id uuid;
-  v_role staff_role;
-  v_override boolean;
-begin
-  select id, role into v_staff_id, v_role from staff where auth_user_id = auth.uid() and is_active limit 1;
-  if v_staff_id is null then
-    return false;
-  end if;
-
-  select allowed into v_override from permissions where staff_id = v_staff_id and feature_key = p_feature;
-  if v_override is not null then
-    return v_override;
-  end if;
-
-  return v_role in ('admin', 'manager');
-end;
-$$;
-
--- ----------------------------------------------------------------------------
 -- Moves money between two accounts in the caller's own branch (e.g. Fonepay
 -- -> Bank, Bank -> Cash) in one atomic step: both balances update and both
 -- ledger_entries rows are written together, or neither happens. SECURITY
@@ -681,15 +676,7 @@ $$;
 grant execute on function increment_stock(uuid, numeric, text, text) to authenticated;
 
 -- ----------------------------------------------------------------------------
--- Reverses a purchase in one atomic step: gives back whatever was paid out
--- of Accounts, undoes the shortfall added to the supplier's outstanding
--- balance, and pulls back out any inventory stock that was added on receipt
--- — or none of it, if any part fails. Only allowed for purchases created
--- since the caller's local start-of-day (passed in, since the app already
--- computes "today" client-side the same way for Today's Snapshot — this
--- keeps that definition consistent rather than trusting the server's own
--- timezone). security definer, same narrow-RPC-bypassing-RLS template as
--- transfer_funds() — it enforces its own checks rather than relying on RLS.
+-- Reverses a purchase in one atomic step — see schema.sql for full comments.
 -- ----------------------------------------------------------------------------
 create or replace function cancel_purchase(p_purchase_id uuid, p_local_day_start timestamptz)
 returns void
@@ -1130,13 +1117,6 @@ grant execute on function adjust_customer_due(uuid, numeric, text) to authentica
 
 
 
--- ----------------------------------------------------------------------------
--- Menu item <-> inventory item links, for usage comparison reports only.
--- Deliberately NOT used for automatic stock deduction (that's the harder,
--- still-unsolved recipe/BOM problem) — this is purely "which menu items are
--- made from this ingredient", used to compare purchased quantity against
--- units sold of the linked items over a period.
--- ----------------------------------------------------------------------------
 create table menu_inventory_links (
   id uuid primary key default uuid_generate_v4(),
   branch_id uuid references branches(id) on delete cascade,
@@ -1147,322 +1127,8 @@ create table menu_inventory_links (
 );
 
 -- ============================================================================
--- Row Level Security — every table, branch-scoped.
---
--- The model: any signed-in staff member can read/write any row that belongs
--- to their own branch (via current_staff_branch()), and nothing outside it.
--- This is branch ISOLATION, not per-role permissions — a waiter and a
--- manager have the same database-level access; the app's own
--- staff/permissions system (Settings > Staff) is what hides/shows features
--- per role in the UI. Adding real per-role database restrictions on top of
--- this is a reasonable future layer, not done here.
---
--- current_staff_branch() is SECURITY DEFINER deliberately — it has to read
--- the `staff` table to resolve your branch, and `staff` itself has RLS
--- enabled below, which would otherwise make this function unable to see
--- even its own caller's row (a lookup deadlock). SECURITY DEFINER lets this
--- one narrow, read-only, auth.uid()-scoped lookup bypass RLS internally —
--- it still only ever returns the branch of whoever is actually calling it.
+-- Row Level Security is intentionally left OFF in this version.
+-- Turn it on once real staff login is wired up — see schema.sql for the
+-- policies to add at that point. Running with RLS on before login exists
+-- would lock the app out of its own tables.
 -- ============================================================================
-create or replace function current_staff_branch() returns uuid
-language sql stable security definer as $$
-  select branch_id from staff where auth_user_id = auth.uid() limit 1;
-$$;
-
--- branches: a staff member can see/edit only their own branch's row (not
--- create or delete branches from the client — that stays an admin/SQL task).
-alter table branches enable row level security;
-create policy "staff can access their own branch" on branches for select
-  using (id = current_staff_branch());
-create policy "staff can update their own branch" on branches for update
-  using (id = current_staff_branch() and current_staff_has_permission('settings'))
-  with check (id = current_staff_branch() and current_staff_has_permission('settings'));
--- Deliberately public — the login screen needs to resolve a typed-in code
--- ("myhapa", "banepakitli") to a real cafe *before* Google sign-in even
--- starts, so there's no signed-in session yet to scope this by. A cafe's
--- name/code isn't sensitive (it's already printed on receipts), so this
--- is a safe, narrow carve-out rather than a real exposure.
-create policy "anyone can look up a branch by its code" on branches for select
-  using (true);
-
--- Tables with a direct branch_id column — the simple case.
-alter table restaurant_settings enable row level security;
-create policy "staff can view their branch restaurant_settings" on restaurant_settings for select
-  using (branch_id = current_staff_branch());
-create policy "settings-permitted staff can insert their branch restaurant_settings" on restaurant_settings for insert
-  with check (branch_id = current_staff_branch() and current_staff_has_permission('settings'));
-create policy "settings-permitted staff can edit their branch restaurant_settings" on restaurant_settings for update
-  using (branch_id = current_staff_branch() and current_staff_has_permission('settings'))
-  with check (branch_id = current_staff_branch() and current_staff_has_permission('settings'));
-create policy "settings-permitted staff can delete their branch restaurant_settings" on restaurant_settings for delete
-  using (branch_id = current_staff_branch() and current_staff_has_permission('settings'));
-
-alter table payment_methods enable row level security;
-create policy "staff can view their branch payment_methods" on payment_methods for select
-  using (branch_id = current_staff_branch());
-create policy "settings-permitted staff can insert their branch payment_methods" on payment_methods for insert
-  with check (branch_id = current_staff_branch() and current_staff_has_permission('settings'));
-create policy "settings-permitted staff can edit their branch payment_methods" on payment_methods for update
-  using (branch_id = current_staff_branch() and current_staff_has_permission('settings'))
-  with check (branch_id = current_staff_branch() and current_staff_has_permission('settings'));
-create policy "settings-permitted staff can delete their branch payment_methods" on payment_methods for delete
-  using (branch_id = current_staff_branch() and current_staff_has_permission('settings'));
-
-alter table accounts enable row level security;
--- Regular accounts (Cash, eSewa, Fonepay, ...) stay visible to everyone in
--- the branch, same as before. An account whose payment_method is marked
--- is_internal (Bank) is only visible to staff with the 'financials'
--- permission — this is what actually hides the balance, not just the UI.
-create policy "staff can view their branch accounts" on accounts for select
-  using (
-    branch_id = current_staff_branch()
-    and (
-      current_staff_financials_ok()
-      or exists (select 1 from payment_methods pm where pm.id = accounts.payment_method_id and pm.is_internal = false)
-    )
-  );
-create policy "staff can write their branch accounts" on accounts for insert
-  with check (branch_id = current_staff_branch());
-create policy "staff can update their branch accounts" on accounts for update
-  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
--- No DELETE policy, deliberately — see migration 019. Deleting an account
--- cascades into permanently destroying its entire ledger_entries history.
-
-alter table account_transfers enable row level security;
--- Deliberately no insert/update/delete policy here at all — the only way
--- to create a transfer is through transfer_funds(), which is SECURITY
--- DEFINER and bypasses RLS for its own writes. Direct table access stays
--- select-only, and only for staff with the 'financials' permission.
-create policy "financials-permitted staff can view their branch transfers" on account_transfers for select
-  using (branch_id = current_staff_branch() and current_staff_financials_ok());
-
-alter table bank_ledger_entries enable row level security;
--- No direct update/delete policy — editing or removing an entry only ever
--- happens through edit_bank_ledger_entry()/delete_bank_ledger_entry()
--- (both security definer, see migration 008), which write the entry's
--- previous state into bank_ledger_entry_history before touching it. That's
--- what guarantees the audit trail can't be skipped by some future code path.
-create policy "financials-permitted staff can view their branch bank ledger" on bank_ledger_entries for select
-  using (branch_id = current_staff_branch() and current_staff_financials_ok());
-create policy "financials-permitted staff can add to their branch bank ledger" on bank_ledger_entries for insert
-  with check (branch_id = current_staff_branch() and current_staff_financials_ok());
-
-alter table bank_ledger_entry_history enable row level security;
-create policy "financials-permitted staff can view their branch bank ledger history" on bank_ledger_entry_history for select
-  using (branch_id = current_staff_branch() and current_staff_financials_ok());
-
-alter table staff enable row level security;
-create policy "staff can view their branch staff" on staff for select
-  using (branch_id = current_staff_branch());
-create policy "staff-permitted staff can add their branch staff" on staff for insert
-  with check (branch_id = current_staff_branch() and current_staff_has_permission('staff'));
-create policy "staff-permitted staff can edit their branch staff" on staff for update
-  using (branch_id = current_staff_branch() and current_staff_has_permission('staff'))
-  with check (branch_id = current_staff_branch() and current_staff_has_permission('staff'));
-create policy "staff-permitted staff can remove their branch staff" on staff for delete
-  using (branch_id = current_staff_branch() and current_staff_has_permission('staff'));
-
-alter table restaurant_tables enable row level security;
-create policy "staff can access their branch tables" on restaurant_tables for all
-  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
-
-alter table reservations enable row level security;
-create policy "staff can access their branch reservations" on reservations for all
-  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
-
-alter table menu_categories enable row level security;
-create policy "staff can access their branch menu_categories" on menu_categories for all
-  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
-
-alter table menu_items enable row level security;
-create policy "staff can access their branch menu_items" on menu_items for all
-  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
-
-alter table shifts enable row level security;
-create policy "staff can access their branch shifts" on shifts for all
-  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
-
-alter table customers enable row level security;
-create policy "staff can access their branch customers" on customers for all
-  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
-
-alter table orders enable row level security;
-create policy "staff can access their branch orders" on orders for all
-  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
-
-alter table inventory_items enable row level security;
-create policy "staff can access their branch inventory_items" on inventory_items for all
-  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
-
-alter table suppliers enable row level security;
-create policy "staff can access their branch suppliers" on suppliers for all
-  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
-
-alter table purchases enable row level security;
-create policy "staff can access their branch purchases" on purchases for all
-  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
-
-alter table expenses enable row level security;
-create policy "staff can access their branch expenses" on expenses for all
-  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
-
-alter table contacts enable row level security;
-create policy "staff can access their branch contacts" on contacts for all
-  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
-
--- Child tables with no branch_id of their own — scoped through their parent.
--- order_items was previously RLS-enabled with NO policy at all (an oversight
--- in the original starter pattern that would have silently blocked all
--- Kitchen/Orders/Billing access the moment RLS was switched on) — fixed here.
-alter table order_items enable row level security;
-create policy "staff can view their branch order_items" on order_items for select
-  using (exists (select 1 from orders where orders.id = order_items.order_id and orders.branch_id = current_staff_branch()));
-create policy "staff can add their branch order_items" on order_items for insert
-  with check (exists (select 1 from orders where orders.id = order_items.order_id and orders.branch_id = current_staff_branch()));
-create policy "staff can edit their branch order_items" on order_items for update
-  using (exists (select 1 from orders where orders.id = order_items.order_id and orders.branch_id = current_staff_branch()))
-  with check (exists (select 1 from orders where orders.id = order_items.order_id and orders.branch_id = current_staff_branch()));
--- No DELETE policy, deliberately — see migration 019.
-
-alter table payments enable row level security;
-create policy "staff can view their branch payments" on payments for select
-  using (exists (select 1 from orders where orders.id = payments.order_id and orders.branch_id = current_staff_branch()));
-create policy "staff can add their branch payments" on payments for insert
-  with check (exists (select 1 from orders where orders.id = payments.order_id and orders.branch_id = current_staff_branch()));
-create policy "staff can edit their branch payments" on payments for update
-  using (exists (select 1 from orders where orders.id = payments.order_id and orders.branch_id = current_staff_branch()))
-  with check (exists (select 1 from orders where orders.id = payments.order_id and orders.branch_id = current_staff_branch()));
--- No DELETE policy, deliberately — see migration 019.
-
--- A payment should only ever land on an order that's still 'open' or
--- 'billing' — this makes it impossible to add one to an already-closed
--- order, regardless of a double-tap, a stale screen, or a client bug.
--- See migration 016.
-create or replace function prevent_payment_on_closed_order() returns trigger as $$
-declare
-  v_status text;
-begin
-  select status into v_status from orders where id = new.order_id;
-  if v_status in ('paid', 'cancelled') then
-    raise exception 'This order is already % — a payment can''t be added to it. If this bill needs correcting, use Cancel/Reverse instead of billing it again.', v_status;
-  end if;
-  return new;
-end;
-$$ language plpgsql security definer set search_path = public;
-
-drop trigger if exists trg_prevent_payment_on_closed_order on payments;
-create trigger trg_prevent_payment_on_closed_order
-  before insert on payments
-  for each row execute function prevent_payment_on_closed_order();
-
-alter table ledger_entries enable row level security;
-create policy "staff can view their branch ledger_entries" on ledger_entries for select
-  using (
-    exists (
-      select 1 from accounts a
-      join payment_methods pm on pm.id = a.payment_method_id
-      where a.id = ledger_entries.account_id
-        and a.branch_id = current_staff_branch()
-        and (pm.is_internal = false or current_staff_financials_ok())
-    )
-  );
-create policy "staff can write their branch ledger_entries" on ledger_entries for insert
-  with check (exists (select 1 from accounts where accounts.id = ledger_entries.account_id and accounts.branch_id = current_staff_branch()));
-
-alter table permissions enable row level security;
-create policy "staff can view their branch permissions" on permissions for select
-  using (exists (select 1 from staff where staff.id = permissions.staff_id and staff.branch_id = current_staff_branch()));
-create policy "staff-permitted staff can set their branch permissions" on permissions for insert
-  with check (
-    exists (select 1 from staff where staff.id = permissions.staff_id and staff.branch_id = current_staff_branch())
-    and current_staff_has_permission('staff')
-  );
-create policy "staff-permitted staff can edit their branch permissions" on permissions for update
-  using (
-    exists (select 1 from staff where staff.id = permissions.staff_id and staff.branch_id = current_staff_branch())
-    and current_staff_has_permission('staff')
-  )
-  with check (
-    exists (select 1 from staff where staff.id = permissions.staff_id and staff.branch_id = current_staff_branch())
-    and current_staff_has_permission('staff')
-  );
-create policy "staff-permitted staff can remove their branch permissions" on permissions for delete
-  using (
-    exists (select 1 from staff where staff.id = permissions.staff_id and staff.branch_id = current_staff_branch())
-    and current_staff_has_permission('staff')
-  );
-
-alter table menu_modifiers enable row level security;
-create policy "staff can access their branch menu_modifiers" on menu_modifiers for all
-  using (exists (select 1 from menu_items where menu_items.id = menu_modifiers.menu_item_id and menu_items.branch_id = current_staff_branch()))
-  with check (exists (select 1 from menu_items where menu_items.id = menu_modifiers.menu_item_id and menu_items.branch_id = current_staff_branch()));
-
-alter table menu_item_combo_components enable row level security;
-create policy "staff can access their branch menu_item_combo_components" on menu_item_combo_components for all
-  using (exists (select 1 from menu_items where menu_items.id = menu_item_combo_components.combo_item_id and menu_items.branch_id = current_staff_branch()))
-  with check (exists (select 1 from menu_items where menu_items.id = menu_item_combo_components.combo_item_id and menu_items.branch_id = current_staff_branch()));
-
-alter table shift_balances enable row level security;
-create policy "staff can view their branch shift_balances" on shift_balances for select
-  using (exists (select 1 from shifts where shifts.id = shift_balances.shift_id and shifts.branch_id = current_staff_branch()));
-create policy "staff can add their branch shift_balances" on shift_balances for insert
-  with check (exists (select 1 from shifts where shifts.id = shift_balances.shift_id and shifts.branch_id = current_staff_branch()));
-create policy "staff can edit their branch shift_balances" on shift_balances for update
-  using (exists (select 1 from shifts where shifts.id = shift_balances.shift_id and shifts.branch_id = current_staff_branch()))
-  with check (exists (select 1 from shifts where shifts.id = shift_balances.shift_id and shifts.branch_id = current_staff_branch()));
--- No DELETE policy, deliberately — see migration 019.
-
-alter table stock_movements enable row level security;
-create policy "staff can view their branch stock_movements" on stock_movements for select
-  using (exists (select 1 from inventory_items where inventory_items.id = stock_movements.inventory_item_id and inventory_items.branch_id = current_staff_branch()));
-create policy "staff can add their branch stock_movements" on stock_movements for insert
-  with check (exists (select 1 from inventory_items where inventory_items.id = stock_movements.inventory_item_id and inventory_items.branch_id = current_staff_branch()));
-create policy "staff can edit their branch stock_movements" on stock_movements for update
-  using (exists (select 1 from inventory_items where inventory_items.id = stock_movements.inventory_item_id and inventory_items.branch_id = current_staff_branch()))
-  with check (exists (select 1 from inventory_items where inventory_items.id = stock_movements.inventory_item_id and inventory_items.branch_id = current_staff_branch()));
--- No DELETE policy, deliberately — see migration 019.
-
-alter table menu_inventory_links enable row level security;
-create policy "staff can access their branch menu_inventory_links" on menu_inventory_links for all
-  using (branch_id = current_staff_branch()) with check (branch_id = current_staff_branch());
-
-alter table due_settlements enable row level security;
-create policy "staff can view their branch due settlements" on due_settlements for select
-  using (branch_id = current_staff_branch());
-create policy "staff can log real payments to their branch due settlements" on due_settlements for insert
-  with check (branch_id = current_staff_branch() and kind = 'payment');
--- No policy permits a direct client insert with kind = 'adjustment' — only
--- adjust_customer_due() can create one, since it's security definer and
--- bypasses RLS for its own writes.
-
-alter table purchase_lines enable row level security;
-create policy "staff can view their branch purchase_lines" on purchase_lines for select
-  using (exists (select 1 from purchases where purchases.id = purchase_lines.purchase_id and purchases.branch_id = current_staff_branch()));
-create policy "staff can add their branch purchase_lines" on purchase_lines for insert
-  with check (exists (select 1 from purchases where purchases.id = purchase_lines.purchase_id and purchases.branch_id = current_staff_branch()));
-create policy "staff can edit their branch purchase_lines" on purchase_lines for update
-  using (exists (select 1 from purchases where purchases.id = purchase_lines.purchase_id and purchases.branch_id = current_staff_branch()))
-  with check (exists (select 1 from purchases where purchases.id = purchase_lines.purchase_id and purchases.branch_id = current_staff_branch()));
--- No DELETE policy, deliberately — see migration 019.
-
-alter table purchase_payments enable row level security;
-create policy "staff can view their branch purchase_payments" on purchase_payments for select
-  using (exists (select 1 from purchases where purchases.id = purchase_payments.purchase_id and purchases.branch_id = current_staff_branch()));
-create policy "staff can add their branch purchase_payments" on purchase_payments for insert
-  with check (exists (select 1 from purchases where purchases.id = purchase_payments.purchase_id and purchases.branch_id = current_staff_branch()));
-create policy "staff can edit their branch purchase_payments" on purchase_payments for update
-  using (exists (select 1 from purchases where purchases.id = purchase_payments.purchase_id and purchases.branch_id = current_staff_branch()))
-  with check (exists (select 1 from purchases where purchases.id = purchase_payments.purchase_id and purchases.branch_id = current_staff_branch()));
--- No DELETE policy, deliberately — see migration 019.
-
-alter table dismissed_notifications enable row level security;
-create policy "staff can access their branch dismissed_notifications" on dismissed_notifications for all
-  using (exists (select 1 from staff where staff.id = dismissed_notifications.staff_id and staff.branch_id = current_staff_branch()))
-  with check (exists (select 1 from staff where staff.id = dismissed_notifications.staff_id and staff.branch_id = current_staff_branch()));
-
--- NOTE: PIN-based floor staff (no Supabase auth_user_id) authenticate through
--- an Edge Function that verifies the PIN hash and issues a short-lived
--- signed session (or a scoped Supabase JWT via a custom auth hook). Do not
--- relax RLS to make client-side PIN comparisons work — that recreates the
--- exact vulnerability being fixed. (Superseded by real Google sign-in —
--- see authStore.ts / link_staff_account() above.)
