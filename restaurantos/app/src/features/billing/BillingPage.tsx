@@ -11,6 +11,7 @@ import { useOrdersStore } from '../orders/ordersStore'
 import { useTablesStore } from '../tables/tablesStore'
 import { useCustomersStore } from '../customers/customersStore'
 import type { LiveOrder } from '../orders/types'
+import { findSuspiciousPayments, type PaymentWarning } from './paymentSanity'
 
 function ReviewQrCard({ link, onClose }: { link: string; onClose: () => void }) {
   return (
@@ -33,7 +34,6 @@ export function BillingPage() {
   const customers = useCustomersStore((s) => s.customers)
   const initCustomers = useCustomersStore((s) => s.init)
   const addCustomer = useCustomersStore((s) => s.addCustomer)
-  const applyPayment = useCustomersStore((s) => s.applyPayment)
 
   const orders = useOrdersStore((s) => s.orders)
   const ordersLoading = useOrdersStore((s) => s.loading)
@@ -172,6 +172,9 @@ export function BillingPage() {
 
   const paid = paymentMethods.reduce((s, m) => s + (amounts[m.key] || 0), 0)
   const remaining = total - advancePaid - paid // can go negative (change due)
+  const billRemainingBeforeEntry = Math.max(0, total - advancePaid)
+
+  const [confirmWarnings, setConfirmWarnings] = useState<PaymentWarning[] | null>(null)
 
   // Typing just updates that one field — the "fill the rest into the other
   // method" only happens once you leave the field (blur/Tab), and only when
@@ -181,6 +184,9 @@ export function BillingPage() {
   // get silently recorded against a method that was never actually paid.
   function setAmount(key: string, value: number) {
     setAmounts((cur) => ({ ...cur, [key]: Math.max(0, value) }))
+    // Editing the amount after a warning was shown means it needs to be
+    // re-checked against the new figure, not waved through on the old one.
+    setConfirmWarnings(null)
   }
   function handleAmountBlur(key: string) {
     if (paymentMethods.length !== 2) return
@@ -238,8 +244,24 @@ export function BillingPage() {
   }, [customers, customerSearch])
   const selectedCustomer = customers.find((c) => c.id === customerId)
 
-  async function handleCompletePayment() {
+  // A digital-wallet payment well above what's owed has no legitimate
+  // reason to happen (there's no change to make electronically), so it
+  // gets a confirmation instead of saving straight away. Cash is only
+  // flagged at an extreme multiple, since handing over a big note for
+  // change is completely normal. See paymentSanity.ts.
+  async function handleCompletePayment(skipConfirm = false) {
     if (!order || processingPayment) return
+
+    if (!skipConfirm) {
+      const enteredPayments = paymentMethods.map((m) => ({ methodKey: m.key, amount: amounts[m.key] || 0 }))
+      const warnings = findSuspiciousPayments(enteredPayments, billRemainingBeforeEntry)
+      if (warnings.length > 0) {
+        setConfirmWarnings(warnings)
+        return
+      }
+    }
+    setConfirmWarnings(null)
+
     setProcessingPayment(true)
     setBillingError(null)
     try {
@@ -285,11 +307,9 @@ export function BillingPage() {
       return
     }
 
-    if (customerId) {
-      // Lifetime spend counts the whole bill, not just what was physically
-      // collected — a due is still money they've spent, just not paid yet.
-      await applyPayment(customerId, total, Math.max(0, remaining))
-    }
+    // The customer's lifetime spend / loyalty points / due balance are
+    // already updated by the RPC above, inside the same transaction as the
+    // payment itself — see migration 021. Nothing left to do here.
 
     setToast(remaining > 0 ? 'Marked as due' : remaining < 0 ? 'Payment completed — change due' : 'Payment completed')
     setTimeout(() => setToast(null), 2500)
@@ -755,10 +775,28 @@ export function BillingPage() {
             className="w-full mb-1 text-sm border border-ink/10 rounded-xl px-3 py-2.5 outline-none focus:border-ember"
           />
 
+          {confirmWarnings && (
+            <div className="mt-2 rounded-xl border border-status-cleaning bg-status-cleaning-bg px-3 py-2.5">
+              {confirmWarnings.map((w, i) => (
+                <p key={i} className="text-xs font-semibold text-status-cleaning">
+                  You're recording Rs. {w.amount} on {w.methodKey} against a Rs. {w.billRemaining} bill — is that right?
+                </p>
+              ))}
+              <div className="flex gap-2 mt-2">
+                <Button variant="secondary" className="flex-1" onClick={() => setConfirmWarnings(null)}>
+                  Let me check
+                </Button>
+                <Button className="flex-1" onClick={() => handleCompletePayment(true)}>
+                  Yes, it's right
+                </Button>
+              </div>
+            </div>
+          )}
+
           <Button
             className="mt-2"
             disabled={(remaining > 0 && !customerId) || processingPayment}
-            onClick={handleCompletePayment}
+            onClick={() => handleCompletePayment()}
           >
             {processingPayment ? 'Processing…' : remaining > 0 ? `Mark Rs. ${remaining} as due & close` : 'Complete payment'}
           </Button>

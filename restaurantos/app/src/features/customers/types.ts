@@ -10,6 +10,7 @@ export interface Customer {
   dueSince?: string // ISO — when they first went into debt (for the Settings reminder threshold), cleared once settled
   notes?: string
   visitCount: number // from a paid-orders count, not a separate stored field
+  createdAt: string // ISO — when this customer record was first created
 }
 
 // Loyalty isn't a stored field — it's derived from visit count, so it's

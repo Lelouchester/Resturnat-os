@@ -36,6 +36,7 @@ function mapRow(row: any, visitCounts: Map<string, number>): Customer {
     dueSince: row.due_since ?? undefined,
     notes: row.notes ?? undefined,
     visitCount: visitCounts.get(row.id) ?? 0,
+    createdAt: row.created_at,
   }
 }
 

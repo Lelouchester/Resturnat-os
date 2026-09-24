@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { LayoutGrid, ClipboardList, ChefHat, Receipt, Clock, BookOpen, Boxes, Truck, Users, UserCog, BarChart3, Settings, MoreHorizontal, X, Keyboard, LogOut, Landmark } from 'lucide-react'
+import { LayoutGrid, ClipboardList, ChefHat, Receipt, Clock, BookOpen, Boxes, Truck, Users, UserCog, BarChart3, Settings, MoreHorizontal, X, Keyboard, LogOut, Landmark, HelpCircle } from 'lucide-react'
 import { NotificationBell } from './NotificationBell'
 import { ShortcutsHelpModal } from './ShortcutsHelpModal'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
@@ -40,7 +40,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   // straight into a redirect for something that looked like a real option.
   const nav = NAV.filter((item) => staff?.role === 'admin' || (staff?.permissions[item.feature] ?? false))
   const primary = nav.slice(0, PRIMARY_COUNT)
-  const overflow = nav.slice(PRIMARY_COUNT)
+  // Help isn't permission-gated — everyone signed in can reach it, whatever
+  // their role, so it's added after filtering rather than living in NAV
+  // (which every entry there is checked against staff.permissions).
+  const overflow = [...nav.slice(PRIMARY_COUNT), { to: '/help', label: 'Help', icon: HelpCircle }]
   const overflowActive = overflow.some((item) => item.to === location.pathname)
   useKeyboardShortcuts(() => setShortcutsOpen(true))
 
@@ -72,6 +75,17 @@ export function AppShell({ children }: { children: ReactNode }) {
               {label}
             </NavLink>
           ))}
+          <NavLink
+            to="/help"
+            className={({ isActive }) =>
+              `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors mt-2 pt-2 border-t border-ink/5 ${
+                isActive ? 'bg-ink text-paper' : 'text-ink/40 hover:bg-ink/5'
+              }`
+            }
+          >
+            <HelpCircle size={18} />
+            Help & guides
+          </NavLink>
         </nav>
         <AccountFooter />
       </aside>

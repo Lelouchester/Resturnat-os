@@ -2,11 +2,20 @@ import { create } from 'zustand'
 import { supabase } from '../../shared/lib/supabase'
 import { useAuthStore, currentBranchId } from '../auth/authStore'
 import { useTablesStore } from '../tables/tablesStore'
-import { useAccountsStore } from '../accounts/accountsStore'
 import { nepalToday, nepalDayStartUTC } from '../../shared/lib/nepalDate'
 import { useMenuStore } from '../menu/menuStore'
 import { useInventoryStore } from '../inventory/inventoryStore'
 import type { CartLine, LiveOrder, OrderItemRow, OrderItemStatus } from './types'
+
+// Database errors from the payment RPCs are already written to be shown
+// as-is (see the RAISE messages in migration 021) — this only rewrites the
+// couple of cases that come from Postgres/PostgREST itself rather than
+// from the function's own wording, and gives a plain fallback otherwise.
+function explainOrderError(error: { code?: string; message?: string }): string {
+  if (error.code === 'P0001' && error.message) return error.message
+  if (error.code === '55P03') return 'Someone else is finishing this bill right now — wait a moment and try again.'
+  return "Couldn't complete this — check your connection and try again. Nothing was charged."
+}
 
 /**
  * Real data now — this is the store that makes Orders, Kitchen, and Billing
@@ -14,9 +23,16 @@ import type { CartLine, LiveOrder, OrderItemRow, OrderItemStatus } from './types
  * menuStore: `init()` loads every currently-open-or-billing order for the
  * branch (with its line items and table label embedded via PostgREST), then
  * keeps that in sync over Realtime. Every write below (sendItemsToKitchen,
- * updateItemStatus, transferOrderTable, mergeOrders, completePayment) writes
- * straight to Postgres and lets the same subscription reflect it back into
- * `orders` — on every device, kitchen included, without anyone refreshing.
+ * updateItemStatus, transferOrderTable, mergeOrders) writes straight to
+ * Postgres and lets the same subscription reflect it back into `orders` —
+ * on every device, kitchen included, without anyone refreshing.
+ *
+ * completePayment / recordPartialPayment / closeNoChargeOrder are each ONE
+ * call to a database function (migration 021) rather than several separate
+ * writes — the whole thing (payment, deposit, ledger, change, closing the
+ * order, freeing the table, the customer's due balance) either all happens
+ * or none of it does. Before this, a dropped connection partway through
+ * could leave, say, a payment saved with no matching money in Accounts.
  *
  * Note on Realtime filtering: `order_items` has no branch_id column of its
  * own (it hangs off `order_id`), so its channel below is NOT branch-filtered
@@ -550,26 +566,15 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
   },
 
   recordPartialPayment: async (orderId, payments) => {
-    const paymentRows = payments
-      .filter((p) => p.amount > 0)
-      .map((p) => {
-        const methodId = useAccountsStore.getState().methodIdForKey(p.methodKey)
-        return methodId ? { order_id: orderId, payment_method_id: methodId, amount: p.amount } : null
-      })
-      .filter((r): r is NonNullable<typeof r> => r !== null)
-
-    if (paymentRows.length === 0) return { ok: true }
-
-    const { error } = await supabase.from('payments').insert(paymentRows)
+    // One database call: the payment(s) are inserted, deposited, and
+    // ledgered together, or none of it happens — see migration 021.
+    const { error } = await supabase.rpc('record_order_payment', {
+      p_order_id: orderId,
+      p_payments: payments.filter((p) => p.amount > 0).map((p) => ({ key: p.methodKey, amount: p.amount })),
+    })
     if (error) {
-      console.error('[ordersStore] recordPartialPayment: writing payments failed', error)
-      return { ok: false, error: error.message?.includes('already') ? error.message : "Couldn't record this payment — nothing was collected." }
-    }
-
-    // Same reasoning as completePayment — money collected now needs to
-    // land in Accounts now, not wait for the table to eventually close.
-    for (const p of payments) {
-      if (p.amount > 0) await useAccountsStore.getState().deposit(p.methodKey, p.amount, { orderId, reason: 'partial payment (table still open)' })
+      console.error('[ordersStore] recordPartialPayment failed', error)
+      return { ok: false, error: explainOrderError(error) }
     }
 
     // Deliberately does NOT touch order.status, closed_at, due_amount, or
@@ -581,202 +586,55 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
 
   completePayment: async (params) => {
     const { orderId, payments, mergedOrderIds = [], customerId } = params
-    const order = get().orders.find((o) => o.id === orderId)
 
-    // Anything already collected earlier via recordPartialPayment (queried
-    // fresh rather than trusted from local state, since this is the last
-    // checkpoint before money math gets stamped permanently) — without
-    // this, a table with an early partial payment would wrongly show the
-    // remainder as still fully due, or hand back change that was never
-    // actually overpaid.
-    const { data: priorPaymentRows, error: priorErr } = await supabase
-      .from('payments')
-      .select('amount')
-      .eq('order_id', orderId)
-    if (priorErr) {
-      console.error('[ordersStore] completePayment: reading prior payments failed', priorErr)
-      return { ok: false, error: "Couldn't read this order's existing payments — try again." }
-    }
-    const priorPaid = (priorPaymentRows ?? []).reduce((s, p) => s + (Number(p.amount) || 0), 0)
-
-    const paymentRows = payments
-      .filter((p) => p.amount > 0)
-      .map((p) => {
-        const methodId = useAccountsStore.getState().methodIdForKey(p.methodKey)
-        return methodId ? { order_id: orderId, payment_method_id: methodId, amount: p.amount } : null
-      })
-      .filter((r): r is NonNullable<typeof r> => r !== null)
-
-    if (paymentRows.length > 0) {
-      const { error } = await supabase.from('payments').insert(paymentRows)
-      if (error) {
-        console.error('[ordersStore] completePayment: writing payments failed', error)
-        // Stop here — deliberately does NOT continue to deposit money or
-        // close the order. This is exactly the case migration 016's
-        // trigger is meant to catch (a payment on an already-closed
-        // order) — surfacing it here instead of silently carrying on is
-        // what makes that guard actually protective rather than just
-        // quietly swallowed by a console.error nobody's watching.
-        return { ok: false, error: error.message?.includes('already') ? error.message : "Couldn't record this payment — nothing was charged or closed. Try again, or check if this order was already settled." }
-      }
-    }
-
-    // Move real money: each collected payment deposits into that method's
-    // account (and logs a ledger entry) — the same balance Purchasing
-    // withdraws from.
-    for (const p of payments) {
-      if (p.amount > 0) await useAccountsStore.getState().deposit(p.methodKey, p.amount, { orderId, reason: 'order payment' })
-    }
-
-    // If what came in adds up to more than the bill, that excess gets
-    // physically handed back as cash — whether the overpayment itself was
-    // cash or something else (eSewa, Fonepay). Without this, a customer
-    // paying extra by eSewa and getting cash change back would silently
-    // leave the tracked Cash balance higher than what's actually in the
-    // drawer, since the cash going *out* as change was never recorded
-    // anywhere. This assumes change is always given in cash, which is
-    // standard practice — if that's ever not true for a specific order,
-    // this would need a manual correction via Accounts > Adjust balance.
-    // Tagging this withdrawal with orderId (rather than leaving it
-    // unlinked) is what makes it net against this order's revenue instead
-    // of getting miscategorized as an unrelated "purchase" — see the
-    // comment on withdraw() in accountsStore for the full reasoning.
-    const totalPaid = payments.reduce((s, p) => s + p.amount, 0)
-    const changeGiven = priorPaid + totalPaid - params.total
-    if (changeGiven > 0) {
-      await useAccountsStore.getState().withdraw('cash', changeGiven, { orderId, reason: 'Change given to customer' })
-    }
-
-    const { error: closeErr } = await supabase
-      .from('orders')
-      .update({
-        status: 'paid',
-        closed_at: new Date().toISOString(),
-        customer_id: customerId ?? null,
-        subtotal: params.subtotal,
-        discount_amount: params.discountAmount,
-        service_charge: params.serviceCharge,
-        tax_amount: params.taxAmount,
-        tip_amount: params.tipAmount,
-        total: params.total,
-        split_guest_count: params.splitGuestCount,
-        // Stamped directly here, once, rather than reconstructed later by
-        // re-summing the payments rows above — if one of those inserts
-        // ever silently fails (a dropped request on a flaky connection),
-        // a report re-deriving "was this left due" from the now-incomplete
-        // payments table would wrongly conclude the whole bill is still
-        // unpaid, even though the real due tracker (customers.outstanding_due,
-        // set from this same totalPaid figure) is already correct. Includes
-        // any partial payment collected earlier via recordPartialPayment.
-        due_amount: Math.max(0, params.total - priorPaid - totalPaid),
-        billing_remark: params.remark?.trim() || null,
-      })
-      .eq('id', orderId)
-    if (closeErr) {
-      console.error('[ordersStore] completePayment: closing order failed', closeErr)
-      // Money's already been collected and deposited by this point — this
-      // is a genuinely awkward partial-failure state (unlike the payments
-      // insert failing above, there's no clean way to undo a deposit that
-      // already landed), so it's surfaced as an error rather than silently
-      // treated as success, even though it can't be fully rolled back here.
-      set({ orders: await loadOpenOrders() })
-      return { ok: false, error: 'Payment was recorded, but closing the order failed — check this table before billing it again.' }
-    }
-
-    if (mergedOrderIds.length > 0) {
-      const { error: mergedErr } = await supabase
-        .from('orders')
-        .update({ status: 'paid', closed_at: new Date().toISOString() })
-        .in('id', mergedOrderIds)
-      if (mergedErr) console.error('[ordersStore] completePayment: closing merged orders failed', mergedErr)
-    }
-
-    const tableIds = [
-      order?.tableId,
-      ...mergedOrderIds.map((id) => get().orders.find((o) => o.id === id)?.tableId),
-    ].filter((id): id is string => Boolean(id))
-
-    if (tableIds.length > 0) {
-      const { error: tableErr } = await supabase
-        .from('restaurant_tables')
-        .update({ status: 'needs_cleaning', customer_name: null, customer_phone: null, customer_id: null, guest_count: null, seated_at: null, note: null })
-        .in('id', tableIds)
-      if (tableErr) console.error('[ordersStore] completePayment: freeing tables failed', tableErr)
+    // One database call does the whole bill: payment(s), deposit, ledger,
+    // change, closing the order (+ any merged orders), freeing the
+    // table(s), and the customer's due/lifetime-spend/loyalty update —
+    // all as one transaction, or none of it happens. See migration 021.
+    const { data, error } = await supabase.rpc('complete_payment', {
+      p_order_id: orderId,
+      p_payments: payments.filter((p) => p.amount > 0).map((p) => ({ key: p.methodKey, amount: p.amount })),
+      p_merged_order_ids: mergedOrderIds,
+      p_customer_id: customerId ?? null,
+      p_subtotal: params.subtotal,
+      p_discount_amount: params.discountAmount,
+      p_service_charge: params.serviceCharge,
+      p_tax_amount: params.taxAmount,
+      p_tip_amount: params.tipAmount,
+      p_total: params.total,
+      p_split_guest_count: params.splitGuestCount,
+      p_remark: params.remark?.trim() || null,
+    })
+    if (error) {
+      console.error('[ordersStore] completePayment failed', error)
+      return { ok: false, error: explainOrderError(error) }
     }
 
     set({ orders: await loadOpenOrders() })
-    return { ok: true }
+    return { ok: true, ...(data as { due_amount: number; change_given: number; total_paid: number }) }
   },
 
   closeNoChargeOrder: async (orderId, params) => {
     const { mergedOrderIds = [] } = params
-    const order = get().orders.find((o) => o.id === orderId)
 
-    // No trigger guards this path the way migration 016 guards payments
-    // (there's no payments row involved), so this check is what stops a
-    // double-tap here from retroactively overwriting an order that's
-    // already been billed normally in the meantime.
-    const { data: currentRow, error: statusErr } = await supabase.from('orders').select('status').eq('id', orderId).single()
-    if (statusErr || !currentRow || currentRow.status === 'paid' || currentRow.status === 'cancelled') {
-      return { ok: false, error: 'This order is already closed — refresh and check before trying again.' }
-    }
-
-    // Deliberately no payments inserted, no accounts/ledger deposit, and
-    // due_amount is always 0 — nothing was charged, so nothing is owed.
-    // total/subtotal are still stamped for real, though, since the point of
-    // this table is to keep an honest record of what staff consumed.
-    const { error: closeErr } = await supabase
-      .from('orders')
-      .update({
-        status: 'paid',
-        closed_at: new Date().toISOString(),
-        subtotal: params.subtotal,
-        discount_amount: 0,
-        service_charge: 0,
-        tax_amount: 0,
-        tip_amount: 0,
-        total: params.total,
-        due_amount: 0,
-        is_staff_order: true,
-        billing_remark: params.remark?.trim() || null,
-      })
-      .eq('id', orderId)
-    if (closeErr) {
-      console.error('[ordersStore] closeNoChargeOrder: closing order failed', closeErr)
-      return { ok: false, error: "Couldn't close this order — try again." }
-    }
-
-    if (mergedOrderIds.length > 0) {
-      const { error: mergedErr } = await supabase
-        .from('orders')
-        .update({ status: 'paid', closed_at: new Date().toISOString(), due_amount: 0, is_staff_order: true })
-        .in('id', mergedOrderIds)
-      if (mergedErr) console.error('[ordersStore] closeNoChargeOrder: closing merged orders failed', mergedErr)
-    }
-
-    const tableIds = [
-      order?.tableId,
-      ...mergedOrderIds.map((id) => get().orders.find((o) => o.id === id)?.tableId),
-    ].filter((id): id is string => Boolean(id))
-
-    if (tableIds.length > 0) {
-      const { error: tableErr } = await supabase
-        .from('restaurant_tables')
-        .update({ status: 'needs_cleaning', customer_name: null, customer_phone: null, customer_id: null, guest_count: null, seated_at: null, note: null })
-        .in('id', tableIds)
-      if (tableErr) console.error('[ordersStore] closeNoChargeOrder: freeing tables failed', tableErr)
+    // One database call: locked, permission-checked, and closes the order
+    // (+ any merged orders) and frees the table(s) together. See migration 021.
+    const { error } = await supabase.rpc('close_no_charge_order', {
+      p_order_id: orderId,
+      p_merged_order_ids: mergedOrderIds,
+      p_subtotal: params.subtotal,
+      p_total: params.total,
+      p_remark: params.remark?.trim() || null,
+    })
+    if (error) {
+      console.error('[ordersStore] closeNoChargeOrder failed', error)
+      return { ok: false, error: explainOrderError(error) }
     }
 
     set({ orders: await loadOpenOrders() })
     return { ok: true }
   },
 
-  // Reverses a completed (paid) order from today — the money it collected,
-  // any tracked inventory it deducted, and its effect on the attached
-  // customer's due/lifetime spend, all atomically in one database function.
-  // Built for same-day mistakes like a duplicate order entered twice, not
-  // as a general "undo any order" tool — see the migration for the exact
-  // rules it enforces (today only, paid orders only, not a merged bill).
   cancelPaidOrder: async (orderId) => {
     // Nepal-anchored, not the device's own clock/timezone — this used to
     // claim consistency with Today's Snapshot, but that boundary was

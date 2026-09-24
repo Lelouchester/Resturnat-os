@@ -12,6 +12,7 @@ import { TodaySnapshot } from './TodaySnapshot'
 import { ItemUsageReport } from './ItemUsageReport'
 import { TodayOrdersReport } from './TodayOrdersReport'
 import { RevenueVsPurchasesCard } from './RevenueVsPurchasesCard'
+import { DiscountReportCard } from './DiscountReportCard'
 import { DailyItemSalesPrintView } from './DailyItemSalesPrintView'
 import { useInventoryStore } from '../inventory/inventoryStore'
 import { useCustomersStore } from '../customers/customersStore'
@@ -102,13 +103,19 @@ export function ReportsPage() {
       </div>
 
       {view === 'today' ? (
-        <TodaySnapshot />
+        <>
+          <DiscountReportCard />
+          <TodaySnapshot />
+        </>
       ) : view === 'usage' ? (
         <ItemUsageReport />
       ) : view === 'orders' ? (
         <TodayOrdersReport />
       ) : view === 'trends' ? (
-        <RevenueVsPurchasesCard />
+        <>
+          <DiscountReportCard />
+          <RevenueVsPurchasesCard />
+        </>
       ) : (
         <>
       <div className="flex items-center justify-end mb-4 gap-2 flex-wrap">

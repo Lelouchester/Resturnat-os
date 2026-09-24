@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, X, PackageCheck, Phone, Receipt, Trash2, Download, Ban } from 'lucide-react'
 import { nepalToday, nepalDayStartUTC, nepalDayEndUTC } from '../../shared/lib/nepalDate'
+import { money } from '../../shared/lib/money'
 import { Card } from '../../shared/ui/Card'
 import { Button } from '../../shared/ui/Button'
 import { usePurchasingStore } from './purchasingStore'
@@ -126,7 +127,7 @@ export function PurchasingPage() {
         {paymentMethods.map((m) => (
           <div key={m.key} className="text-xs">
             <span className="text-ink/40">{m.label}: </span>
-            <span className="font-ticket font-bold">Rs. {balances[m.key] ?? 0}</span>
+            <span className="font-ticket font-bold">Rs. {money(balances[m.key] ?? 0)}</span>
           </div>
         ))}
       </Card>
@@ -284,7 +285,7 @@ export function PurchasingPage() {
                   <span className="text-xs font-semibold rounded-full bg-ink/5 px-2 py-0.5">{CATEGORY_LABELS[p.category]}</span>
                   <span className="text-xs text-ink/40">{supplier?.name ?? 'One-off'}</span>
                 </div>
-                <span className={`font-ticket font-bold text-sm ${isCancelled ? 'line-through' : ''}`}>Rs. {total}</span>
+                <span className={`font-ticket font-bold text-sm ${isCancelled ? 'line-through' : ''}`}>Rs. {money(total)}</span>
               </div>
               <div className="text-xs text-ink/50 mb-2">
                 {p.lines.map((l) => `${l.quantity}× ${l.description}`).join(', ')}
@@ -295,7 +296,7 @@ export function PurchasingPage() {
                     const label = paymentMethods.find((m) => m.key === key)?.label ?? key
                     return (
                       <span key={key} className="text-[11px] font-semibold bg-ink/[0.04] rounded-full px-2 py-0.5">
-                        {label}: Rs. {amt}
+                        {label}: Rs. {money(amt)}
                       </span>
                     )
                   })}
@@ -310,7 +311,7 @@ export function PurchasingPage() {
                       {p.status === 'received' ? 'Received' : 'Ordered'}
                     </span>
                   )}
-                  {!isCancelled && paid < total && <span className="text-status-cleaning font-semibold">Rs. {total - paid} unpaid</span>}
+                  {!isCancelled && paid < total && <span className="text-status-cleaning font-semibold">Rs. {money(total - paid)} unpaid</span>}
                 </div>
                 {!isCancelled && (
                   <div className="flex items-center gap-3">
@@ -591,7 +592,7 @@ function NewPurchaseModal({
           <div className="border-t border-ink/5 pt-3 mb-3">
             <div className="flex justify-between text-sm font-semibold mb-3">
               <span>Total</span>
-              <span className="font-ticket">Rs. {total}</span>
+              <span className="font-ticket">Rs. {money(total)}</span>
             </div>
             <label className="text-xs font-semibold text-ink/50 mb-1.5 block">Paid now</label>
             <div className="space-y-2 mb-2">

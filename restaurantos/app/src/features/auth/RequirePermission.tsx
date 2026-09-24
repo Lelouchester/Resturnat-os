@@ -1,4 +1,4 @@
-import { Navigate } from 'react-router-dom'
+import { Navigate, Link } from 'react-router-dom'
 import { useAuthStore } from './authStore'
 import { FEATURES, type FeatureKey, type StaffMember } from '../staff/types'
 
@@ -71,6 +71,7 @@ function NoAccessScreen() {
     <div className="p-6 text-center pt-24">
       <p className="text-sm text-ink/50">Your account doesn't have access to any part of this app yet.</p>
       <p className="text-sm text-ink/50 mt-1">Ask an admin to grant you at least one permission on the Staff page.</p>
+      <Link to="/help" className="text-sm font-semibold text-ember mt-3 inline-block">See Help & guides</Link>
     </div>
   )
 }

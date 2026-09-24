@@ -5,7 +5,7 @@ import { useContactsStore } from './contactsStore'
 import { useSettingsStore } from '../settings/settingsStore'
 import { CustomerDetailModal } from './CustomerDetailModal'
 import { DuesView } from './DuesView'
-import { loyaltyTier } from './types'
+import { loyaltyTier, type Customer } from './types'
 
 const TIER_STYLE: Record<string, string> = {
   New: 'bg-ink/5 text-ink/50',
@@ -16,6 +16,51 @@ const TIER_STYLE: Record<string, string> = {
 
 function daysOverdue(dueSince: string) {
   return Math.floor((Date.now() - new Date(dueSince).getTime()) / (24 * 60 * 60 * 1000))
+}
+
+// The main customer list previously had a search box but no way to order
+// it — anyone with more than a couple dozen customers had to scroll and
+// scan by eye to find who owes the most (or the least). Kept separate from
+// the sort logic already built into the Dues tab (which only ever looks at
+// customers who HAVE a due): this covers the whole list, including people
+// with nothing owing.
+type CustomerSortMode = 'name' | 'dueHigh' | 'dueLow' | 'spendHigh' | 'recent'
+
+const CUSTOMER_SORT_LABELS: Record<CustomerSortMode, string> = {
+  name: 'Name',
+  dueHigh: 'Due: highest',
+  dueLow: 'Due: lowest',
+  spendHigh: 'Top spenders',
+  recent: 'Recently added',
+}
+
+function sortCustomers(customers: Customer[], mode: CustomerSortMode): Customer[] {
+  const list = [...customers]
+  const nameOf = (c: Customer) => c.name || 'Walk-in customer'
+  switch (mode) {
+    case 'dueHigh':
+      // Ties (most people have due = 0) fall back to name, so the list
+      // doesn't look randomly shuffled among everyone with nothing owing.
+      return list.sort((a, b) => b.outstandingDue - a.outstandingDue || nameOf(a).localeCompare(nameOf(b)))
+    case 'dueLow':
+      // "Lowest" means lowest among people who actually owe something —
+      // ranking everyone-at-zero as "lowest" would just bury every real due
+      // at the bottom of its own sort. Zero-due customers are kept, just
+      // sorted after every real due, smallest due first.
+      return list.sort((a, b) => {
+        if (a.outstandingDue <= 0 && b.outstandingDue <= 0) return nameOf(a).localeCompare(nameOf(b))
+        if (a.outstandingDue <= 0) return 1
+        if (b.outstandingDue <= 0) return -1
+        return a.outstandingDue - b.outstandingDue
+      })
+    case 'spendHigh':
+      return list.sort((a, b) => b.lifetimeSpend - a.lifetimeSpend || nameOf(a).localeCompare(nameOf(b)))
+    case 'recent':
+      return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    case 'name':
+    default:
+      return list.sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
+  }
 }
 
 export function CustomersPage() {
@@ -36,6 +81,7 @@ export function CustomersPage() {
   const [newName, setNewName] = useState('')
   const [newPhone, setNewPhone] = useState('')
   const [newOpeningDue, setNewOpeningDue] = useState('')
+  const [sortMode, setSortMode] = useState<CustomerSortMode>('name')
 
   const overdue = useMemo(
     () => customers.filter((c) => c.outstandingDue > 0 && c.dueSince && daysOverdue(c.dueSince) >= dueReminderDays),
@@ -43,10 +89,10 @@ export function CustomersPage() {
   )
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return customers
-    const q = search.toLowerCase()
-    return customers.filter((c) => c.name?.toLowerCase().includes(q) || c.phone?.includes(q))
-  }, [customers, search])
+    const q = search.trim().toLowerCase()
+    const matched = q ? customers.filter((c) => c.name?.toLowerCase().includes(q) || c.phone?.includes(q)) : customers
+    return sortCustomers(matched, sortMode)
+  }, [customers, search, sortMode])
 
   const selected = customers.find((c) => c.id === selectedId) ?? null
 
@@ -128,7 +174,7 @@ export function CustomersPage() {
         </div>
       )}
 
-      <div className="flex items-center gap-2 bg-surface border border-ink/10 rounded-xl px-3 py-2.5 mb-4">
+      <div className="flex items-center gap-2 bg-surface border border-ink/10 rounded-xl px-3 py-2.5 mb-3">
         <Search size={16} className="text-ink/40" />
         <input
           value={search}
@@ -136,6 +182,21 @@ export function CustomersPage() {
           placeholder="Search by name or phone"
           className="flex-1 text-sm outline-none bg-transparent"
         />
+      </div>
+
+      <div className="flex items-center gap-1.5 mb-4 flex-wrap">
+        <span className="text-xs text-ink/40 mr-0.5">Sort:</span>
+        {(Object.keys(CUSTOMER_SORT_LABELS) as CustomerSortMode[]).map((mode) => (
+          <button
+            key={mode}
+            onClick={() => setSortMode(mode)}
+            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+              sortMode === mode ? 'bg-ink text-paper' : 'bg-ink/5 text-ink/50'
+            }`}
+          >
+            {CUSTOMER_SORT_LABELS[mode]}
+          </button>
+        ))}
       </div>
 
       {adding && (

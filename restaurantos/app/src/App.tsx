@@ -22,6 +22,7 @@ import { StaffPage } from './features/staff/StaffPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { LoginPage } from './features/auth/LoginPage'
 import { BankPage } from './features/bank/BankPage'
+import { HelpPage } from './features/help/HelpPage'
 
 // Reports pulls in recharts, which is heavy — lazy-load it so the chart
 // library only downloads when someone actually opens Reports, instead of
@@ -140,6 +141,9 @@ function App() {
               <Route path="/staff" element={<RequirePermission feature="staff"><StaffPage /></RequirePermission>} />
               <Route path="/bank" element={<RequirePermission feature="financials"><BankPage /></RequirePermission>} />
               <Route path="/settings" element={<RequirePermission feature="settings"><SettingsPage /></RequirePermission>} />
+              {/* No RequirePermission here on purpose — every signed-in person, whatever
+                  their role, should be able to reach the help guide. */}
+              <Route path="/help" element={<HelpPage />} />
               <Route path="/login" element={<LoginPage />} />
             </Routes>
             </RouteErrorBoundary>
