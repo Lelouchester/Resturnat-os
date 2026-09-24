@@ -38,3 +38,16 @@ later statements only if they compare the role as text (`role::text`).
     ./trend_e2e.sh                  # seeds two weeks of known data and checks the REAL daily_revenue_vs_purchases
                                     # returns the exact expected totals for this week and the previous week,
                                     # excluding staff orders, cancelled orders and cancelled purchases
+
+## Atomic payments (021)
+    ./post4.sh   # complete_payment / record_order_payment / close_no_charge_order
+                  # 37 checks: exact reproductions of the two live-data bugs (a
+                  # retried payment now refused; a failure partway through leaves
+                  # nothing behind), change given, merged tables, customer due/
+                  # loyalty, permissions, and double-booking guards.
+
+## Discount report (022) — a spot-check
+    select * from daily_discounts(<branch_id>, '2026-09-20', '2026-09-20');
+    -- seed known orders (some with discount_amount, one staff order, one
+    -- cancelled) and confirm the totals match by hand; excludes staff and
+    -- cancelled orders, matched exactly against seeded data during development.
