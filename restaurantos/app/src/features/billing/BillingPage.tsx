@@ -803,6 +803,18 @@ export function BillingPage() {
           {remaining > 0 && !customerId && (
             <p className="text-xs text-status-cleaning text-center mt-1.5">Attach a customer above to mark the rest as due.</p>
           )}
+          {remaining > 0 && customerId && (
+            // "Due" still counts as a real sale — the amount goes into today's
+            // sales figures right away, and just sits against this customer
+            // until they pay it off. It is NOT the right way to record a
+            // staff meal or a freebie — that's the button below instead.
+            <p className="text-xs text-ink/40 text-center mt-1.5">
+              This records Rs. {total} in sales now, with Rs. {remaining} owed by the customer. For a staff meal or a comp,
+              use "No charge" below instead — it isn't a sale.
+            </p>
+          )}
+
+          <div className="h-px bg-ink/10 my-3" />
 
           {/* For a table that wasn't set up as a staff table ahead of time
               — e.g. items were already added before anyone decided this was
@@ -810,18 +822,23 @@ export function BillingPage() {
               as a real staff table, which does stamp is_staff_order=true at
               closing time regardless of how the table was configured — so
               it's correctly excluded from revenue and shows up under staff
-              reporting the same as any other no-charge close. */}
-          <button
+              reporting the same as any other no-charge close.
+              A real Button, not a faint link: this used to be easy to miss
+              next to the main payment button, which meant a staff meal could
+              get billed as a real (uncollected) sale by mistake. */}
+          <Button
+            variant="secondary"
+            className="w-full flex flex-col items-center gap-0.5 py-2.5"
             onClick={() => {
-              if (window.confirm(`Close ${order.tableLabel} with no charge? Rs. ${subtotal} in items will be recorded, but nothing will be collected or marked due.`)) {
+              if (window.confirm(`Close ${order.tableLabel} with no charge? Rs. ${subtotal} in items will be recorded, but nothing will be collected or marked due, and it will NOT count as a sale.`)) {
                 handleCloseNoCharge()
               }
             }}
             disabled={processingPayment}
-            className="w-full text-center text-xs font-semibold text-ink/40 hover:text-ink mt-2 py-1"
           >
-            Mark as no-charge instead (staff / comp)
-          </button>
+            <span className="text-sm font-semibold">No charge (staff meal / comp)</span>
+            <span className="text-[11px] font-normal text-ink/50">Not a sale — nothing to collect</span>
+          </Button>
           {billingError && (
             <p className="text-xs font-semibold text-status-cleaning bg-status-cleaning-bg rounded-xl px-3 py-2 mt-3">{billingError}</p>
           )}
